@@ -1,3 +1,6 @@
+import { CommandId } from "@t3tools/contracts";
+import { sendCloudComposer } from "@t3tools/client-runtime/state/codex-cloud";
+import { codexCloud } from "../../state/codexCloud";
 import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { armFreshSession, disarmFreshSession, readFreshSessionArm } from "./freshSessionArms";
 import {
@@ -59,7 +62,7 @@ import {
 import { type ChatMessage, DEFAULT_INTERACTION_MODE } from "../../types";
 import { recordPromptSent } from "../GitHubStarPrompt";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import { newMessageId, newThreadId } from "~/lib/utils";
+import { newMessageId, newThreadId, randomUUID } from "~/lib/utils";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
@@ -375,6 +378,40 @@ export function useComposerSend(input: ComposerSendInput) {
     // What the user pressed send on; uploads below can take a while, and a redirect must not
     // decline approvals for a draft that changed meanwhile.
     const promptAtSend = promptRef.current;
+    const cloudDraftAtSend = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+    const answeringPendingQuestion =
+      Boolean(activePendingProgress) &&
+      composerRef.current?.getSendContext()?.answeringPendingUserInput !== false;
+    if (
+      activeProject &&
+      !answeringPendingQuestion &&
+      !queuedRunEdit.isEditing &&
+      (await sendCloudComposer(
+        appAtomRegistry,
+        codexCloud,
+        {
+          environmentId,
+          projectId: activeProject.id,
+          prompt: promptAtSend,
+          hasNonTextContent: !!directAnnotation || draftHasNonPromptContent(composerDraftTarget),
+        },
+        () => {
+          if (
+            useComposerDraftStore.getState().getComposerDraft(composerDraftTarget) ===
+            cloudDraftAtSend
+          ) {
+            if (
+              currentRouteThreadKeyRef.current === routeThreadKey &&
+              promptRef.current === promptAtSend
+            )
+              promptRef.current = "";
+            setComposerDraftPrompt(composerDraftTarget, "");
+          }
+        },
+        () => CommandId.make(randomUUID()),
+      ))
+    )
+      return;
     if (
       usageLimitsOffered &&
       usageLimitsKey !== null &&

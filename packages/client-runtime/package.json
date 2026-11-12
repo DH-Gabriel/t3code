@@ -546,6 +546,10 @@
     "./provider-instance-ids": {
       "types": "./src/providerInstanceIds.ts",
       "default": "./src/providerInstanceIds.ts"
+    },
+    "./state/codex-cloud": {
+      "types": "./src/state/codexCloud.ts",
+      "default": "./src/state/codexCloud.ts"
     }
   },
   "scripts": {

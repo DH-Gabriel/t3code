@@ -33,6 +33,16 @@ export type ProviderWorkspaceSnapshot = ServerProvider &
   Pick<ServerProviderWorkspaceSnapshot, "slashCommandsPending" | "optionDescriptors">;
 
 export interface ProviderInstance {
+  readonly codexCloudExecution?: Effect.Effect<
+    {
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+      readonly env: NodeJS.ProcessEnv;
+      readonly accountKey: string;
+      readonly accountId?: string;
+    },
+    ProviderDriverError
+  >;
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
   readonly continuationIdentity: ProviderContinuationIdentity;

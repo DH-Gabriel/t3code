@@ -1,3 +1,4 @@
+import * as CodexCloud from "./provider/CodexCloud.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -1411,6 +1412,7 @@ export const layerWsRpc = (
         | ThreadLaunchService.ThreadLaunchService
         | FileSystem.FileSystem
         | ServerConfig.ServerConfig
+        | CodexCloud.CodexCloud
         | ServerSettings.ServerSettingsService
         | DocumentText.DocumentText
       >();
@@ -1500,6 +1502,7 @@ export const layerWsRpc = (
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+      const codexCloud = yield* CodexCloud.CodexCloud;
       const acpRegistryCatalog = yield* AcpRegistrySupport.AcpRegistryCatalog;
       const acpRegistryRuntimeCoordinator =
         yield* AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator;
@@ -2921,6 +2924,9 @@ export const layerWsRpc = (
               (cause) => new OrchestrationDispatchCommandError({ message: cause.message, cause }),
             ),
           ),
+        [WS_METHODS.codexCloudOptions]: (input) => codexCloud.options(input),
+        [WS_METHODS.codexCloudSubmit]: (input) => codexCloud.submit(input),
+        [WS_METHODS.codexCloudSaveEnvironment]: (input) => codexCloud.saveEnvironment(input),
         [WS_METHODS.projectsCreateNew]: (input) =>
           managedFolders
             .createNamedProject(input)
