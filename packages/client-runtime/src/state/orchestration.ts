@@ -39,7 +39,7 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
     ) => Atom.Atom<Pick<EnvironmentShellState, "removedAt">>;
     /** Runs on each turn-range and full-thread diff the server answers. */
     readonly onCheckpointDiffAnswer?: QueryAnswerHandler<
-      { readonly ignoreWhitespace?: boolean },
+      { readonly ignoreWhitespace?: boolean; readonly repositoryAttachmentId?: string },
       OrchestrationGetTurnDiffResult
     >;
   } = {},

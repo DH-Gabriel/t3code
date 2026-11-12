@@ -782,6 +782,18 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
       input.runtimePolicy.sandboxPolicy === undefined
         ? runtimeModeDefaults.sandboxPolicy
         : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy);
+    const sandboxWithDirectories =
+      sandboxPolicy?.type === "workspaceWrite" && input.runtimePolicy.additionalDirectories?.length
+        ? {
+            ...sandboxPolicy,
+            writableRoots: [
+              ...new Set([
+                ...(sandboxPolicy.writableRoots ?? []),
+                ...input.runtimePolicy.additionalDirectories,
+              ]),
+            ],
+          }
+        : sandboxPolicy;
     const selectedEffort =
       getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort") ??
       codexDefaultReasoningEffortOverride(input.modelSelection.model);
@@ -793,10 +805,17 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
         : getCodexServiceTierOptionValue(input.modelSelection);
     // MCP-written app context must be quoted user input, not developer instructions.
     const appContext = Object.fromEntries(
-      (input.appContext ?? []).map((entry) => [
-        entry.key,
-        { kind: "untrusted" as const, value: entry.text },
-      ]),
+      [
+        ...(input.appContext ?? []),
+        ...(input.runtimePolicy.additionalDirectories?.length
+          ? [
+              {
+                key: "attached_project_checkouts",
+                text: input.runtimePolicy.additionalDirectories.join("\n"),
+              },
+            ]
+          : []),
+      ].map((entry) => [entry.key, { kind: "untrusted" as const, value: entry.text }]),
     );
     const t3Context =
       input.hasT3Mcp === true
@@ -823,7 +842,7 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
       // Omitting the reviewer on resume preserves the previous Auto reviewer.
       approvalsReviewer: runtimeModeDefaults.approvalsReviewer,
       ...(approvalPolicy === undefined ? {} : { approvalPolicy }),
-      ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
+      ...(sandboxWithDirectories === undefined ? {} : { sandboxPolicy: sandboxWithDirectories }),
       ...(effort === undefined ? {} : { effort }),
       ...(serviceTier === undefined ? {} : { serviceTier }),
       // Codex supplies its own mode instructions; send both modes to clear Plan on exit.

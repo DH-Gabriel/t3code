@@ -309,6 +309,7 @@ const PersistedDraftThreadState = Schema.Struct({
   threadId: ThreadId,
   environmentId: Schema.String,
   projectId: ProjectId,
+  repositoryProjectIds: Schema.optionalKey(Schema.Array(ProjectId)),
   logicalProjectKey: Schema.optionalKey(Schema.String),
   environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -402,6 +403,7 @@ export interface DraftSessionState {
   threadId: ThreadId;
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  repositoryProjectIds?: ReadonlyArray<ProjectId>;
   logicalProjectKey: string;
   environmentSelection?: "auto" | "manual";
   loadBalancedEnvironmentId?: EnvironmentId | null;
@@ -424,6 +426,9 @@ interface ProjectDraftSession extends DraftSessionState {
 export type ComposerThreadTarget = ScopedThreadRef | DraftId;
 
 interface ComposerDraftStoreState {
+  repositorySelectionPendingByTargetKey: Record<string, true>;
+  setRepositorySelectionPending: (target: ComposerThreadTarget, pending: boolean) => void;
+  isRepositorySelectionPending: (target: ComposerThreadTarget) => boolean;
   draftsByThreadKey: Record<string, ComposerThreadDraftState>;
   draftThreadsByThreadKey: Record<string, DraftThreadState>;
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
@@ -487,6 +492,7 @@ interface ComposerDraftStoreState {
   setDraftThreadContext: (
     threadRef: ComposerThreadTarget,
     options: {
+      repositoryProjectIds?: ReadonlyArray<ProjectId>;
       branch?: string | null;
       worktreePath?: string | null;
       projectRef?: ScopedProjectRef;
@@ -1531,6 +1537,7 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    repositoryProjectIds: projectChanged ? [] : (existingThread?.repositoryProjectIds ?? []),
     promotedTo: null,
   };
 }
@@ -1565,6 +1572,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    left.repositoryProjectIds === right.repositoryProjectIds &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -1713,6 +1721,11 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        repositoryProjectIds: Array.isArray(candidateDraftThread.repositoryProjectIds)
+          ? candidateDraftThread.repositoryProjectIds.filter(
+              (id): id is ProjectId => typeof id === "string" && id.length > 0,
+            )
+          : [],
         ...(candidateDraftThread.environmentSelection === "manual" ||
         candidateDraftThread.environmentSelection === "auto"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
@@ -2193,7 +2206,10 @@ export function partializeComposerDraftStoreState(
     if (!keptSessionKeys.has(threadKey)) {
       continue;
     }
-    persistedDraftThreadsByThreadKey[threadKey] = draftThread;
+    persistedDraftThreadsByThreadKey[threadKey] = {
+      ...draftThread,
+      repositoryProjectIds: [...(draftThread.repositoryProjectIds ?? [])],
+    };
   }
   return {
     draftsByThreadKey: persistedDraftsByThreadKey,
@@ -2477,6 +2493,7 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    repositoryProjectIds: persistedDraftThread.repositoryProjectIds ?? [],
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
       : {}),
@@ -2503,6 +2520,25 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
       return {
         draftsByThreadKey: {},
         draftThreadsByThreadKey: {},
+        repositorySelectionPendingByTargetKey: {},
+        isRepositorySelectionPending: (target) =>
+          get().repositorySelectionPendingByTargetKey[
+            typeof target === "string" ? target : scopedThreadKey(target)
+          ] === true,
+        setRepositorySelectionPending: (target, pending) =>
+          set((state) => {
+            const key = typeof target === "string" ? target : scopedThreadKey(target);
+            if (pending)
+              return {
+                repositorySelectionPendingByTargetKey: {
+                  ...state.repositorySelectionPendingByTargetKey,
+                  [key]: true,
+                },
+              };
+            const { [key]: _removed, ...repositorySelectionPendingByTargetKey } =
+              state.repositorySelectionPendingByTargetKey;
+            return { repositorySelectionPendingByTargetKey };
+          }),
         logicalProjectDraftThreadKeyByLogicalProjectKey: {},
         backgroundSubmissionThreadKeys: {},
         promotedDraftRedirects: {},
@@ -2742,7 +2778,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 : options.startFromOrigin;
             const environmentSelection =
               options.environmentSelection ??
-              (options.branch != null || options.worktreePath != null
+              (options.branch != null ||
+              options.worktreePath != null ||
+              (options.repositoryProjectIds?.length ?? 0) > 0
                 ? "manual"
                 : existing.environmentSelection);
             const nextDraftThread: DraftThreadState = {
@@ -2768,6 +2806,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              repositoryProjectIds:
+                options.repositoryProjectIds ??
+                (projectChanged ? [] : (existing.repositoryProjectIds ?? [])),
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -2783,6 +2824,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
+              nextDraftThread.repositoryProjectIds === existing.repositoryProjectIds &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;

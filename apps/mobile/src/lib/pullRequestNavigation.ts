@@ -16,7 +16,7 @@ export function nativePullRequestDestination(
     configLoaded,
     environmentId: EnvironmentId.make(context.environmentId),
     projectId: ProjectId.make(context.projectId),
-    lendHostProject: true,
+    lendHostProject: false,
   });
   if (target === null) return null;
   return {

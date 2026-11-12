@@ -177,6 +177,7 @@ type LegacyLinkedPullRequest = Pick<ThreadLinkedPullRequest, "repository" | "num
 export function pullRequestPanelContext(
   thread: {
     readonly projectId: string | null;
+    readonly repositoryAttachments?: ReadonlyArray<{ readonly projectId: string }> | undefined;
     readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
     readonly linkedPullRequest?: LegacyLinkedPullRequest | null | undefined;
     readonly branchPullRequest?: LegacyLinkedPullRequest | null | undefined;
@@ -188,7 +189,11 @@ export function pullRequestPanelContext(
     readonly number: number;
   },
 ): "page" | "thread" {
-  if (thread.projectId !== surface.projectId) return "page";
+  if (
+    thread.projectId !== surface.projectId &&
+    !thread.repositoryAttachments?.some((attachment) => attachment.projectId === surface.projectId)
+  )
+    return "page";
   const links = visibleThreadPullRequests(thread.pullRequests ?? []);
   if (links.length > 0) {
     const repository = surface.repository.toLowerCase();
@@ -212,12 +217,18 @@ export function pullRequestPanelContext(
     : "page";
 }
 
-export function threadPullRequestPanelTarget(thread: {
-  readonly projectId: string;
-  readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
-  readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
-  readonly branchPullRequest?: ThreadLinkedPullRequest | null | undefined;
-}) {
+export function threadPullRequestPanelTarget(
+  thread: {
+    readonly projectId: string;
+    readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
+    readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+    readonly branchPullRequest?: ThreadLinkedPullRequest | null | undefined;
+  },
+  projects?: ReadonlyArray<{
+    readonly id: string;
+    readonly repositoryIdentity?: RepositoryIdentity | null | undefined;
+  }>,
+) {
   const current = resolveThreadCurrentPullRequestLink(thread.pullRequests ?? []);
   const legacy = thread.linkedPullRequest;
   if (
@@ -228,8 +239,21 @@ export function threadPullRequestPanelTarget(thread: {
     return legacy;
   }
   if (current !== null) {
+    const projectId =
+      projects === undefined
+        ? thread.projectId
+        : projects.find((project) => {
+            const identity = project.repositoryIdentity;
+            return (
+              identity?.provider &&
+              sourceControlClients
+                .get(identity.provider)
+                .isChangeRequestInRepository(identity, current)
+            );
+          })?.id;
+    if (projectId === undefined) return null;
     return {
-      projectId: thread.projectId,
+      projectId,
       host: current.host,
       repository: current.repository,
       number: current.number,

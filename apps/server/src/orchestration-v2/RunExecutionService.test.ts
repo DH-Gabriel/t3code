@@ -1114,7 +1114,7 @@ it.effect(
     }).pipe(Effect.provide(layerRunExecutionTest)),
 );
 
-it.effect("starts the provider when checkpoint baseline capture fails", () =>
+it.effect("starts with attached baselines after a primary failure", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:run-execution-baseline-failure");
     const runId = RunId.make("run:run-execution-baseline-failure");
@@ -1129,6 +1129,7 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
       id: CheckpointScopeId.make("checkpoint-scope:run-execution-baseline-failure"),
     } as OrchestrationV2CheckpointScope;
     const providerStarts = yield* Ref.make(0);
+    const preparation = yield* Ref.make<string[]>([]);
     const writes = yield* Ref.make<
       ReadonlyArray<{
         events: ReadonlyArray<OrchestrationV2DomainEvent>;
@@ -1141,13 +1142,31 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
           McpAppModelContext.layerEmpty,
           PreviewAgentActivity.layer,
           Layer.mock(CheckpointService.CheckpointServiceV2)({
-            captureBaseline: () =>
-              Effect.fail(
-                new CheckpointService.CheckpointBaselineCaptureError({
-                  scopeId: checkpointScope.id,
-                  ordinalWithinScope: 0,
-                  cause: new Error("VCS process timed out"),
-                }),
+            prepareRootRunScope: (input) =>
+              Effect.succeed({
+                ...checkpointScope,
+                id: CheckpointScopeId.make("checkpoint-scope:attached-baseline"),
+                cwd: input.cwd,
+                ...(input.repositoryAttachmentId === undefined
+                  ? {}
+                  : { repositoryAttachmentId: input.repositoryAttachmentId }),
+              }),
+            captureBaseline: ({ scope }) =>
+              Ref.update(preparation, (steps) => [
+                ...steps,
+                scope.repositoryAttachmentId ?? "primary",
+              ]).pipe(
+                Effect.andThen(
+                  scope.id === checkpointScope.id
+                    ? Effect.fail(
+                        new CheckpointService.CheckpointBaselineCaptureError({
+                          scopeId: checkpointScope.id,
+                          ordinalWithinScope: 0,
+                          cause: new Error("VCS process timed out"),
+                        }),
+                      )
+                    : Effect.void,
+                ),
               ),
           }),
           layerTurnItemPositionsTest,
@@ -1171,11 +1190,34 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
       const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
       yield* runExecution.startRootRun({
         commandId: CommandId.make("command:run-execution-baseline-failure"),
-        appThread: rootAppThread(threadId),
+        appThread: {
+          ...rootAppThread(threadId),
+          repositoryAttachments: [
+            {
+              id: "attachment:active",
+              projectId: rootAppThread(threadId).projectId,
+              checkoutPath: "/attached",
+              repositoryIdentity: null,
+              attachedAt: "2026-11-09T00:00:00.000Z",
+              detachedAt: null,
+            },
+            {
+              id: "attachment:detached",
+              projectId: rootAppThread(threadId).projectId,
+              checkoutPath: "/detached",
+              repositoryIdentity: null,
+              attachedAt: "2026-11-09T00:00:00.000Z",
+              detachedAt: "2026-11-09T01:00:00.000Z",
+            },
+          ],
+        },
         providerSessionId,
         session: {
           events: Stream.never,
-          startTurn: () => Ref.update(providerStarts, (count) => count + 1),
+          startTurn: () =>
+            Ref.update(preparation, (steps) => [...steps, "provider"]).pipe(
+              Effect.andThen(Ref.update(providerStarts, (count) => count + 1)),
+            ),
         } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
         run: {
           id: runId,
@@ -1218,8 +1260,15 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
     }).pipe(Effect.provide(layerTest));
 
     assert.equal(yield* Ref.get(providerStarts), 1);
+    assert.deepEqual(yield* Ref.get(preparation), ["primary", "attachment:active", "provider"]);
 
     const events = (yield* Ref.get(writes)).flatMap((write) => [...write.events]);
+    assert.deepEqual(
+      events
+        .filter((event) => event.type === "checkpoint-scope.created")
+        .map((event) => [event.payload.repositoryAttachmentId, event.payload.cwd]),
+      [["attachment:active", "/attached"]],
+    );
     const failedEvent = events.find(
       (event) =>
         (event.type === "run.updated" ||

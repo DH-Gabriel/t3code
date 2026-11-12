@@ -12,7 +12,13 @@ import { McpAppFrame } from "./McpAppFrame";
 import { checkpointFileTotals } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
-import { useAssistantMessageText, useProject, useThreadShell } from "../../state/entities";
+import {
+  useAssistantMessageText,
+  useProject,
+  useProjects,
+  useThreadShell,
+} from "../../state/entities";
+import { threadRepositoryCheckouts } from "@t3tools/client-runtime/thread-repositories";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
@@ -60,14 +66,19 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             />
           </AssistantCitationSource>
         </div>
-        {ctx.onOpenTurnDiff ? (
-          <AssistantChangedFilesSection
-            turnSummary={row.assistantTurnDiffSummary}
-            routeThreadKey={ctx.routeThreadKey}
-            resolvedTheme={ctx.resolvedTheme}
-            onOpenTurnDiff={ctx.onOpenTurnDiff}
-          />
-        ) : null}
+        {ctx.onOpenTurnDiff
+          ? (row.assistantTurnDiffSummaries ?? []).map((summary) => (
+              <AssistantChangedFilesSection
+                key={summary.repositoryAttachmentId ?? "primary"}
+                turnSummary={summary}
+                routeThreadKey={ctx.routeThreadKey}
+                resolvedTheme={ctx.resolvedTheme}
+                onOpenTurnDiff={(runId, filePath) =>
+                  ctx.onOpenTurnDiff?.(runId, filePath, summary.repositoryAttachmentId ?? "primary")
+                }
+              />
+            ))
+          : null}
         {row.showAssistantMeta ? (
           <AssistantMessageMeta
             className="mt-1.5"
@@ -349,32 +360,51 @@ function AssistantChangedFilesSectionInner({
       : null,
   );
   const onFileContextMenu = useFileContextMenuHandler(ctx.activeThreadEnvironmentId);
+  const projects = useProjects();
+  const checkout =
+    thread && activeProject
+      ? threadRepositoryCheckouts(
+          thread,
+          activeProject,
+          projects.filter((project) => project.environmentId === thread.environmentId),
+        ).find((repository) => repository.id === (turnSummary.repositoryAttachmentId ?? "primary"))
+      : null;
 
   return (
-    <ChangedFilesCard
-      runId={turnSummary.runId}
-      files={checkpointFiles}
-      totals={checkpointFileTotals(turnSummary)}
-      allDirectoriesExpanded={allDirectoriesExpanded}
-      resolvedTheme={resolvedTheme}
-      onToggleAllDirectories={() =>
-        setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
-      }
-      onOpenTurnDiff={onOpenTurnDiff}
-      onFileContextMenu={(filePath, event) =>
-        onFileContextMenu(
-          {
-            environmentId: ctx.activeThreadEnvironmentId,
-            filePath,
-            workspaceRoot: ctx.workspaceRoot,
-            repositoryRoot:
-              thread?.worktreePath == null
-                ? activeProject?.repositoryIdentity?.rootPath
-                : undefined,
-          },
-          event,
-        )
-      }
-    />
+    <div>
+      {(thread?.repositoryAttachments?.length ?? 0) > 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {checkout?.title ?? turnSummary.repositoryAttachmentId ?? activeProject?.title}
+        </p>
+      ) : null}
+      <ChangedFilesCard
+        runId={turnSummary.runId}
+        files={checkpointFiles}
+        totals={checkpointFileTotals(turnSummary)}
+        allDirectoriesExpanded={allDirectoriesExpanded}
+        resolvedTheme={resolvedTheme}
+        onToggleAllDirectories={() =>
+          setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
+        }
+        onOpenTurnDiff={onOpenTurnDiff}
+        onFileContextMenu={(filePath, event) =>
+          onFileContextMenu(
+            {
+              environmentId: ctx.activeThreadEnvironmentId,
+              filePath,
+              workspaceRoot: checkout?.checkoutPath ?? ctx.workspaceRoot,
+              repositoryRoot:
+                turnSummary.repositoryAttachmentId &&
+                turnSummary.repositoryAttachmentId !== "primary"
+                  ? checkout?.repositoryIdentity?.rootPath
+                  : thread?.worktreePath == null
+                    ? activeProject?.repositoryIdentity?.rootPath
+                    : undefined,
+            },
+            event,
+          )
+        }
+      />
+    </div>
   );
 }

@@ -44,7 +44,15 @@ export function useLinkedPullRequestLines(
     const chains = resolveThreadPullRequestChains(supported ? (pullRequests ?? []) : []);
     const open = chains.filter((chain) => chain.layers.some(isOpenLink));
     const done = chains.filter((chain) => !chain.layers.some(isOpenLink));
-    return [...pullRequestListLines(open), ...pullRequestListLines(done)];
+    const lines = [...pullRequestListLines(open), ...pullRequestListLines(done)];
+    const repositories = new Map<string, PullRequestListLine[]>();
+    for (const line of lines) {
+      const key = JSON.stringify([line.link.host, line.link.repository]);
+      const group = repositories.get(key) ?? [];
+      group.push(line);
+      repositories.set(key, group);
+    }
+    return [...repositories.values()].flat();
   }, [pullRequests, supported]);
 }
 

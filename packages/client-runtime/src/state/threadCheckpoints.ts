@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 export interface ThreadCheckpointSummary {
   readonly checkpointId?: CheckpointId;
   readonly scopeId?: CheckpointScopeId;
+  readonly repositoryAttachmentId?: string;
   readonly runId: RunId;
   readonly checkpointTurnCount: number;
   readonly checkpointRef: CheckpointRef;
@@ -29,9 +30,13 @@ export interface ThreadCheckpointSummary {
 }
 
 export function deriveThreadCheckpointSummaries(
-  projection: Pick<OrchestrationV2ThreadProjection, "checkpoints" | "messages">,
+  projection: Pick<OrchestrationV2ThreadProjection, "checkpoints" | "messages"> &
+    Partial<Pick<OrchestrationV2ThreadProjection, "checkpointScopes">>,
 ): ReadonlyArray<ThreadCheckpointSummary> {
   let assistantMessageIdsByRun: Map<RunId, MessageId | null | undefined> | undefined;
+  const attachmentByScope = new Map(
+    projection.checkpointScopes?.map((scope) => [scope.id, scope.repositoryAttachmentId]),
+  );
   let nextMessageIndex = -1;
   return projection.checkpoints.flatMap((checkpoint) => {
     if (checkpoint.appRunOrdinal === null || checkpoint.runId === null) return [];
@@ -60,10 +65,12 @@ export function deriveThreadCheckpointSummaries(
       }
     }
     const assistantMessageId = assistantMessageIdsByRun.get(checkpoint.runId) ?? null;
+    const repositoryAttachmentId = attachmentByScope.get(checkpoint.scopeId);
     return [
       {
         checkpointId: checkpoint.id,
         scopeId: checkpoint.scopeId,
+        ...(repositoryAttachmentId === undefined ? {} : { repositoryAttachmentId }),
         runId: checkpoint.runId,
         checkpointTurnCount: checkpoint.appRunOrdinal,
         checkpointRef: checkpoint.ref,

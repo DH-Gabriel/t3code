@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
+import { CheckpointRef, RunId } from "@t3tools/contracts";
 
 import {
   applyReviewDiffMetadata,
   buildReviewParsedDiff,
+  buildReviewSectionItems,
   resolveReviewSelectedSectionId,
   type ReviewSectionItem,
 } from "./reviewModel";
@@ -29,6 +31,58 @@ describe("resolveReviewSelectedSectionId", () => {
   it("shows the default while the picked section loads and returns to the pick once it does", () => {
     expect(resolveReviewSelectedSectionId([changes], "turn:2")).toBe("git:branch-range");
     expect(resolveReviewSelectedSectionId([turn, changes], "turn:2")).toBe("turn:2");
+  });
+});
+
+describe("buildReviewSectionItems", () => {
+  it("keeps failed captures visible without displaying a cached diff", () => {
+    const sections = buildReviewSectionItems({
+      checkpoints: [
+        {
+          runId: RunId.make("run"),
+          checkpointTurnCount: 2,
+          checkpointRef: CheckpointRef.make("refs/t3/checkpoint"),
+          status: "error",
+          files: [],
+          assistantMessageId: null,
+          completedAt: "2026-11-09T00:00:00Z",
+        },
+      ],
+      gitSections: [],
+      turnDiffById: { "turn:2": "stale diff" },
+      loadingGitSections: false,
+    });
+    expect(sections[0]).toMatchObject({
+      kind: "turn",
+      title: "Turn 2 · Capture failed",
+      unavailable: true,
+      diff: null,
+    });
+  });
+  it("keeps commit previews and separates comments for identical files in different checkouts", () => {
+    const input = {
+      checkpoints: [],
+      gitSections: [
+        {
+          id: "commit:abc",
+          kind: "commit" as const,
+          title: "Commit abc",
+          baseRef: "abc^",
+          headRef: "abc",
+          diff: "+same file",
+          diffHash: "hash",
+          truncated: false,
+        },
+      ],
+      turnDiffById: {},
+      loadingGitSections: false,
+    };
+    const primary = buildReviewSectionItems(input);
+    const first = buildReviewSectionItems({ ...input, checkoutKey: "repo-a" });
+    const second = buildReviewSectionItems({ ...input, checkoutKey: "repo-b" });
+    expect(first[0]).toMatchObject({ id: "commit:abc", kind: "commit", diff: "+same file" });
+    expect(first[0]?.commentId).not.toBe(second[0]?.commentId);
+    expect(primary[0]?.commentId).toBeUndefined();
   });
 });
 

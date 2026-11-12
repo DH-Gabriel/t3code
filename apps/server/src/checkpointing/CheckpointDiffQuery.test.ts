@@ -68,6 +68,60 @@ function layerFor(input: {
   );
 }
 
+it.effect("keeps attached repository history separate from the primary checkout", () => {
+  const projection = makeProjection();
+  const attachedScopeId = CheckpointScopeId.make("scope:attached-repository");
+  const attachedRef = CheckpointRef.make("refs/t3/test/attached");
+  const diffCheckpoints = vi.fn((_input: CheckpointStore.DiffCheckpointsInput) =>
+    Effect.succeed("attached diff"),
+  );
+  const layer = layerFor({
+    projection: Effect.succeed({
+      ...projection,
+      checkpointScopes: [
+        ...projection.checkpointScopes,
+        {
+          id: attachedScopeId,
+          runId: secondRunId,
+          kind: "root_run",
+          cwd: "/attached",
+          repositoryAttachmentId: "attachment:second",
+        },
+      ],
+      checkpoints: [
+        ...projection.checkpoints,
+        { ...projection.checkpoints[0]!, scopeId: attachedScopeId, ref: attachedRef },
+      ],
+    }),
+    diffCheckpoints,
+  });
+  return Effect.gen(function* () {
+    const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+    yield* query.getFullThreadDiff({
+      threadId,
+      toTurnCount: 2,
+      repositoryAttachmentId: "attachment:second",
+    });
+    assert.deepEqual(diffCheckpoints.mock.calls[0]?.[0], {
+      cwd: "/attached",
+      fromCheckpointRef: yield* checkpointRefForScopeOrdinal({
+        scopeId: attachedScopeId,
+        ordinalWithinScope: 1,
+      }),
+      toCheckpointRef: attachedRef,
+      fallbackFromToHead: false,
+      ignoreWhitespace: true,
+      maxOutputBytes: 10_000_001,
+    });
+    yield* query.getFullThreadDiff({ threadId, toTurnCount: 2 });
+    assert.strictEqual(diffCheckpoints.mock.calls[1]?.[0].cwd, "/repo");
+    const unavailable = yield* query
+      .getFullThreadDiff({ threadId, toTurnCount: 2, repositoryAttachmentId: "detached:unknown" })
+      .pipe(Effect.flip);
+    assert.instanceOf(unavailable, CheckpointTurnRangeUnavailableError);
+  }).pipe(Effect.provide(layer));
+});
+
 it.effect("excludes ready checkpoints from rolled-back runs", () => {
   const projection = makeProjection();
   const layer = layerFor({

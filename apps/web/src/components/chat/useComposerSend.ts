@@ -372,6 +372,7 @@ export function useComposerSend(input: ComposerSendInput) {
     },
   ) => {
     e?.preventDefault();
+    if (useComposerDraftStore.getState().isRepositorySelectionPending(composerDraftTarget)) return;
     // What the user pressed send on; uploads below can take a while, and a redirect must not
     // decline approvals for a draft that changed meanwhile.
     const promptAtSend = promptRef.current;
@@ -1192,6 +1193,7 @@ export function useComposerSend(input: ComposerSendInput) {
                 ? {
                     createThread: {
                       projectId: activeProject.id,
+                      repositoryProjectIds: draftThread?.repositoryProjectIds ?? [],
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
