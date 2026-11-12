@@ -272,6 +272,7 @@ function Sidebar({
   side = "left",
   variant = "sidebar",
   collapsible = "offcanvas",
+  hoverReveal = false,
   resizable = false,
   className,
   children,
@@ -280,10 +281,18 @@ function Sidebar({
   side?: "left" | "right";
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
+  hoverReveal?: boolean;
   resizable?: boolean | SidebarResizableOptions;
 }) {
   const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
   const offcanvasCollapsed = !isMobile && collapsible === "offcanvas" && state === "collapsed";
+  const [hovered, setHovered] = React.useState(false);
+  const hoverOpen = hoverReveal && offcanvasCollapsed && hovered;
+  if (!offcanvasCollapsed && hovered) setHovered(false);
+  const closeHover = () => {
+    if (hoverOpen) moveFocusOutOfCollapsingSidebar();
+    setHovered(false);
+  };
 
   const resolvedResizable = resolveSidebarResizable({ collapsible, isMobile, resizable });
   const instanceContextValue: SidebarInstanceContextProps = { side, resizable: resolvedResizable };
@@ -352,12 +361,33 @@ function Sidebar({
         className="group peer hidden text-sidebar-foreground md:block"
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-collapsible-mode={collapsible}
-        inert={offcanvasCollapsed}
+        data-hover-open={hoverOpen || undefined}
         data-side={side}
         data-slot="sidebar"
         data-state={state}
         data-variant={variant}
+        onPointerLeave={closeHover}
+        onKeyDown={(event) => {
+          if (hoverOpen && event.key === "Escape") {
+            event.stopPropagation();
+            closeHover();
+          }
+        }}
       >
+        {hoverReveal && offcanvasCollapsed && (
+          <div
+            aria-hidden="true"
+            className={cn(
+              "fixed inset-y-0 z-20 w-2 [-webkit-app-region:no-drag]",
+              side === "left" ? "left-0" : "right-0",
+              hoverOpen && "pointer-events-none",
+            )}
+            data-slot="sidebar-hover-edge"
+            onPointerEnter={(event) => {
+              if (event.pointerType === "mouse") setHovered(true);
+            }}
+          />
+        )}
         <div
           className={cn(
             "relative w-(--sidebar-width) bg-transparent",
@@ -375,14 +405,16 @@ function Sidebar({
             "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
             "[[data-panel-animations=true]_&]:transition-[left,right,width] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
             side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] group-data-[hover-open=true]:left-0"
+              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] group-data-[hover-open=true]:right-0",
+            hoverOpen && "z-40 shadow-xl",
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
               : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
             className,
           )}
           data-slot="sidebar-container"
+          inert={offcanvasCollapsed && !hoverOpen}
           {...props}
         >
           <div
