@@ -40,7 +40,8 @@ import {
   useAdaptiveWorkspaceLayout,
   useWorkspacePaneState,
 } from "../layout/AdaptiveWorkspaceLayout";
-import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
+import { useReviewRepository } from "./useReviewRepository";
+import * as Dialog from "../../components/ui/Dialog";
 import { useReviewCacheForThread } from "./reviewState";
 import {
   isNativeReviewDiffDrawEvent,
@@ -64,6 +65,9 @@ import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspace
 function ReviewHeader(
   props: Parameters<typeof useReviewHeaderPresentation>[0] & {
     readonly sectionMenu: ReturnType<typeof buildReviewSectionMenu>;
+    readonly repositoryMenu: ReadonlyArray<AppBarMenuItem>;
+    readonly comparisonMenu: ReadonlyArray<AppBarMenuItem>;
+    readonly canReadLiveDiffs: boolean;
     readonly showSectionToolbar: boolean;
     readonly showChangedFilesToggle: boolean;
     readonly onSelectSection: (sectionId: string) => void;
@@ -73,13 +77,20 @@ function ReviewHeader(
   const { toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
   const presentation = useReviewHeaderPresentation(props);
-  const sectionAction = (section: ReviewSectionItem | null, title: string): AppBarMenuItem => ({
+  const sectionAction = (
+    section: ReviewSectionItem | null,
+    title: string,
+    fallbackId?: string,
+  ): AppBarMenuItem => ({
     id: section ? `section:${section.id}` : `unavailable:${title}`,
     title,
-    disabled: section === null,
+    disabled:
+      section?.unavailable === true ||
+      (section === null && (!fallbackId || !props.canReadLiveDiffs)),
     selected: section !== null && section.id === props.selectedSection?.id,
     onPress: () => {
-      if (section) props.onSelectSection(section.id);
+      const id = section?.id ?? fallbackId;
+      if (id) props.onSelectSection(id);
     },
   });
   return (
@@ -104,6 +115,9 @@ function ReviewHeader(
           : undefined
       }
       menus={[
+        ...(props.repositoryMenu.length > 1
+          ? [{ title: "Repository", icon: "folder" as const, items: props.repositoryMenu }]
+          : []),
         ...(presentation.gitMenu ? [presentation.gitMenu] : []),
         ...(props.showSectionToolbar
           ? [
@@ -115,8 +129,12 @@ function ReviewHeader(
                     id: "sections",
                     inline: true,
                     items: [
-                      sectionAction(props.sectionMenu.branchChanges, "Changes"),
-                      sectionAction(props.sectionMenu.workingTree, "Uncommitted"),
+                      sectionAction(props.sectionMenu.branchChanges, "Changes", "git:branch-range"),
+                      sectionAction(
+                        props.sectionMenu.workingTree,
+                        "Uncommitted",
+                        "git:working-tree",
+                      ),
                       sectionAction(props.sectionMenu.latestTurn, "Latest turn"),
                     ],
                   },
@@ -129,12 +147,14 @@ function ReviewHeader(
                             id: `section:${section.id}`,
                             title: section.title,
                             subtitle: section.subtitle ?? undefined,
+                            disabled: section.unavailable === true,
                             selected: section.id === props.selectedSection?.id,
                             onPress: () => props.onSelectSection(section.id),
                           })),
                         },
                       ]
                     : []),
+                  ...props.comparisonMenu,
                   ...(presentation.refreshAction ? [presentation.refreshAction] : []),
                 ],
               },
@@ -376,8 +396,10 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const isEnvironmentReady = environment.presentation?.connection.phase === "connected";
   const { draftMessage, draftContext } = useThreadDraftForThread({ environmentId, threadId });
-  const reviewCache = useReviewCacheForThread({ environmentId, threadId });
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const repository = useReviewRepository();
+  const selectedThreadCwd = repository.cwd;
+  const checkoutKey = repository.checkout?.id === "primary" ? undefined : repository.checkout?.id;
+  const reviewCache = useReviewCacheForThread({ environmentId, threadId, checkoutKey });
   const columnMetrics = useNativeColumnLayoutMetrics();
   const safeArea = columnMetrics?.safeArea ?? insets;
   const topContentInset = useContentTopInset();
@@ -386,6 +408,8 @@ export function ReviewSheet(props: ReviewSheetProps) {
 
   const {
     error,
+    canReadLiveDiffs,
+    commits,
     reviewSections,
     selectedSection,
     refreshSelectedSection,
@@ -396,6 +420,11 @@ export function ReviewSheet(props: ReviewSheetProps) {
     environmentId,
     threadId,
     reviewCache,
+    cwd: selectedThreadCwd,
+    historical: repository.isHistorical,
+    checkoutKey,
+    baseRef: repository.baseRef,
+    commitSha: repository.commitSha,
   });
   useReviewDiffPrewarming({
     threadKey: reviewCache.threadKey,
@@ -413,6 +442,8 @@ export function ReviewSheet(props: ReviewSheetProps) {
     threadKey: reviewCache.threadKey,
     environmentId,
     cwd: selectedThreadCwd,
+    baseRef: repository.baseRef,
+    commitSha: repository.commitSha,
     selectedSection,
     draftMessage,
     draftContext,
@@ -511,7 +542,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     <ReviewFileNavigator
       ref={reviewFileNavigatorRef}
       files={nativeReviewDiffData.files}
-      sectionId={selectedSection?.id ?? null}
+      sectionId={selectedSection ? `${reviewCache.threadKey}:${selectedSection.id}` : null}
       onSelectFile={(fileId) => void handleSelectFile(fileId)}
     />
   );
@@ -558,6 +589,9 @@ export function ReviewSheet(props: ReviewSheetProps) {
     });
   };
   const androidHeaderSubtitle = [
+    repository.checkouts.length + repository.historyCheckouts.length > 1
+      ? repository.checkout?.title
+      : null,
     selectedSection?.title,
     headerDiffSummary.additions,
     headerDiffSummary.deletions,
@@ -601,6 +635,9 @@ export function ReviewSheet(props: ReviewSheetProps) {
     return <>{children}</>;
   })();
   const headerSubtitle = [
+    repository.checkouts.length + repository.historyCheckouts.length > 1
+      ? repository.checkout?.title
+      : null,
     headerDiffSummary.additions,
     headerDiffSummary.deletions,
     pendingReviewCommentCount > 0
@@ -625,13 +662,82 @@ export function ReviewSheet(props: ReviewSheetProps) {
         title={headerTitleText}
         subtitle={headerSubtitle}
         androidSubtitle={androidHeaderSubtitle}
+        isPrimaryCheckout={repository.checkout?.id === "primary"}
         selectedThreadCwd={selectedThreadCwd}
+        repositoryMenu={[
+          ...repository.checkouts.map((checkout) => ({
+            id: checkout.id,
+            title: checkout.title,
+            subtitle: checkout.checkoutPath,
+            selected: !repository.isHistorical && checkout.id === repository.checkout?.id,
+            onPress: () => repository.selectRepository(checkout.id),
+          })),
+          ...(repository.historyCheckouts.length > 0
+            ? [
+                {
+                  id: "history",
+                  title: "Detached project history",
+                  items: repository.historyCheckouts.map((checkout) => ({
+                    id: checkout.id,
+                    title: checkout.title,
+                    selected: repository.isHistorical && checkout.id === repository.checkout?.id,
+                    onPress: () => repository.selectHistory(checkout.id),
+                  })),
+                },
+              ]
+            : []),
+        ]}
+        canReadLiveDiffs={canReadLiveDiffs}
+        comparisonMenu={
+          !canReadLiveDiffs
+            ? []
+            : [
+                {
+                  id: "base",
+                  title: "Base branch",
+                  subtitle: repository.baseRef ?? "Automatic",
+                  onPress: () =>
+                    Dialog.prompt({
+                      title: "Base branch",
+                      message: "Enter a branch or ref. Leave empty to choose automatically.",
+                      initialValue: repository.baseRef ?? "",
+                      confirmText: "Compare",
+                      onConfirm: (value) => repository.selectBase(value.trim() || null),
+                    }),
+                },
+                {
+                  id: "commits",
+                  title: "Commit",
+                  items: [
+                    {
+                      id: "branch",
+                      title: "All branch changes",
+                      selected: repository.commitSha === null,
+                      onPress: () => repository.selectCommit(null),
+                    },
+                    ...commits.map((commit) => ({
+                      id: commit.sha,
+                      title: commit.subject,
+                      subtitle: commit.sha.slice(0, 7),
+                      selected: repository.commitSha === commit.sha,
+                      onPress: () => {
+                        repository.selectCommit(commit.sha);
+                        selectSection(`commit:${commit.sha}`);
+                      },
+                    })),
+                  ],
+                },
+              ]
+        }
         sectionMenu={sectionMenu}
         selectedSection={selectedSection}
         showSectionToolbar={showSectionToolbar}
         showChangedFilesToggle={showChangedFilesToggle}
         onRefresh={handlePullToRefresh}
-        onSelectSection={selectSection}
+        onSelectSection={(id) => {
+          if (id.startsWith("git:")) repository.selectCommit(null);
+          selectSection(id);
+        }}
         onReturnToThread={handleReturnToThread}
       />
 

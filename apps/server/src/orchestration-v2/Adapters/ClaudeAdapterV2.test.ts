@@ -308,6 +308,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       resume: false,
       cwd: "/workspace",
       attachmentsDir: "/attachments",
+      additionalDirectories: ["/api"],
       settings: {
         ...AUTO_COMPACT_CLAUDE_SETTINGS,
         launchArgs: "--add-dir ../apps ../lib --verbose --add-dir=/shared",
@@ -316,6 +317,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.deepEqual(options.additionalDirectories, [
       "/workspace",
       "/attachments",
+      "/api",
       "../apps",
       "../lib",
       "/shared",

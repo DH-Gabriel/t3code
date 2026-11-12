@@ -1238,6 +1238,7 @@ describe("thread outbox", () => {
       },
       creation: {
         projectId: ProjectId.make("project-1"),
+        repositoryProjectIds: [ProjectId.make("project-2")],
         workspaceMode: "worktree",
         branch: "fork/feature",
         worktreePath: null,

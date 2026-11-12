@@ -235,12 +235,15 @@ const ProjectionCheckpointContext = Schema.Struct({
     OrchestrationV2RunJsonSchema.mapFields(({ id, ordinal, status }) => ({ id, ordinal, status })),
   ),
   checkpointScopes: Schema.Array(
-    OrchestrationV2CheckpointScopeJsonSchema.mapFields(({ id, runId, kind, cwd }) => ({
-      id,
-      runId,
-      kind,
-      cwd,
-    })),
+    OrchestrationV2CheckpointScopeJsonSchema.mapFields(
+      ({ id, runId, kind, cwd, repositoryAttachmentId }) => ({
+        id,
+        runId,
+        kind,
+        cwd,
+        repositoryAttachmentId,
+      }),
+    ),
   ),
   checkpoints: Schema.Array(
     OrchestrationV2CheckpointJsonSchema.mapFields(
@@ -268,6 +271,10 @@ export interface ProjectionCheckpointCaptureContext {
    * a run. Without file snapshots that run link is what rewind uses. Stale rows are rebaselined.
    */
   readonly preservedCheckpointOrdinals: ReadonlyArray<number>;
+  readonly repositoryScopes?: ReadonlyArray<{
+    readonly scope: OrchestrationV2CheckpointScope;
+    readonly preservedCheckpointOrdinals: ReadonlyArray<number>;
+  }>;
   /** Side chats share their parent's worktree and never snapshot it. */
   readonly sideChat: boolean;
 }
@@ -1709,6 +1716,7 @@ export function threadShellFromProjection(
     interactionMode: projection.thread.interactionMode,
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
+    repositoryAttachments: projection.thread.repositoryAttachments,
     pullRequests: threadPullRequestsOf(projection.thread),
     ...(projection.thread.linkedPullRequest === undefined
       ? {}
@@ -2021,6 +2029,7 @@ function shellFromState(input: {
     interactionMode: input.state.thread.interactionMode,
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
+    repositoryAttachments: input.state.thread.repositoryAttachments,
     pullRequests: threadPullRequestsOf(input.state.thread),
     ...(input.state.thread.linkedPullRequest === undefined
       ? {}
@@ -5779,7 +5788,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `,
               sql`
               SELECT scope_id AS id, run_id AS "runId", kind,
-                json_extract(payload_json, '$.cwd') AS cwd
+                json_extract(payload_json, '$.cwd') AS cwd,
+                COALESCE(json_extract(payload_json, '$.repositoryAttachmentId'), 'primary') AS "repositoryAttachmentId"
               FROM orchestration_v2_projection_checkpoint_scopes
               WHERE thread_id = ${threadId}
               ORDER BY ordinal_within_parent ASC, scope_id ASC
@@ -5825,7 +5835,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               runRows[0] === undefined
                 ? undefined
                 : yield* decodeRunPayload(runRows[0].payload_json);
-            const [nodeRows, scopeRows, providerRows, preservedRows] = yield* Effect.all([
+            const [
+              nodeRows,
+              scopeRows,
+              providerRows,
+              preservedRows,
+              repositoryScopeRows,
+              repositoryPreservedRows,
+            ] = yield* Effect.all([
               sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_nodes
             WHERE thread_id = ${threadId} AND node_id = ${run?.rootNodeId ?? null}`,
               sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
@@ -5837,8 +5854,23 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 OR provider_thread_id IN (SELECT provider_thread_id FROM orchestration_v2_projection_subagents WHERE thread_id = ${threadId}))`,
               sql<{ readonly ordinal: number }>`SELECT ordinal_within_scope AS ordinal
             FROM orchestration_v2_projection_checkpoints
-            WHERE thread_id = ${threadId} AND scope_id = ${target.scopeId}
-              AND (status = 'ready' OR (status = 'missing' AND run_id IS NOT NULL))`,
+            WHERE thread_id = ${threadId} AND scope_id = ${target.scopeId} AND (status = 'ready' OR (status = 'missing' AND run_id IS NOT NULL))`,
+              sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
+            WHERE thread_id = ${threadId} AND run_id = ${target.runId}
+              AND kind = 'root_run'
+              AND json_extract(payload_json, '$.repositoryAttachmentId') IS NOT NULL
+              AND scope_id != ${target.scopeId}`,
+              sql<{
+                readonly scope_id: string;
+                readonly ordinal: number;
+              }>`SELECT scope_id, ordinal_within_scope AS ordinal
+            FROM orchestration_v2_projection_checkpoints
+            WHERE thread_id = ${threadId} AND (status = 'ready' OR (status = 'missing' AND run_id IS NOT NULL))
+              AND scope_id IN (
+                SELECT scope_id FROM orchestration_v2_projection_checkpoint_scopes
+                WHERE thread_id = ${threadId} AND run_id = ${target.runId}
+                  AND json_extract(payload_json, '$.repositoryAttachmentId') IS NOT NULL
+              )`,
             ]);
             return {
               run,
@@ -5855,6 +5887,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ? undefined
                   : yield* decodeProviderThreadPayload(providerRows[0].payload_json),
               preservedCheckpointOrdinals: preservedRows.map(({ ordinal }) => ordinal),
+              repositoryScopes: yield* Effect.forEach(repositoryScopeRows, (row) =>
+                decodeCheckpointScopePayload(row.payload_json).pipe(
+                  Effect.map((scope) => ({
+                    scope,
+                    preservedCheckpointOrdinals: repositoryPreservedRows
+                      .filter((checkpoint) => checkpoint.scope_id === scope.id)
+                      .map(({ ordinal }) => ordinal),
+                  })),
+                ),
+              ),
               sideChat: threadRows[0].side_chat === 1,
             };
           }),

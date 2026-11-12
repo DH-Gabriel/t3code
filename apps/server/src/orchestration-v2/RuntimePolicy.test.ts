@@ -71,6 +71,12 @@ const supportedRuntimeModesByInstance = new Map<ProviderInstanceId, ReadonlyArra
 ]);
 const providerInstanceFor = (instanceId: ProviderInstanceId) =>
   ({
+    driverKind:
+      instanceId === grokInstanceId
+        ? "grok"
+        : instanceId === antigravityInstanceId
+          ? "antigravity"
+          : "codex",
     snapshot: {
       getSnapshot: Effect.succeed({
         supportedRuntimeModes: supportedRuntimeModesByInstance.get(instanceId),
@@ -116,6 +122,43 @@ const layerWithPolicy = (policy?: ManagedPolicySummary) =>
 const layerTest = layerWithPolicy();
 
 it.layer(layerTest)("RuntimePolicyV2", (it) => {
+  it.effect(
+    "passes active checkout roots and refuses providers without multi-project support",
+    () =>
+      Effect.gen(function* () {
+        const policy = yield* RuntimePolicy.RuntimePolicyV2;
+        const now = yield* DateTime.now;
+        const thread = {
+          ...makeThread({ now, worktreePath: null, runtimeMode: "auto" }),
+          repositoryAttachments: [
+            {
+              id: "api",
+              projectId,
+              checkoutPath: "/api",
+              repositoryIdentity: null,
+              attachedAt: "2026-11-09T00:00:00Z",
+              detachedAt: null,
+            },
+            {
+              id: "removed",
+              projectId,
+              checkoutPath: "/removed",
+              repositoryIdentity: null,
+              attachedAt: "2026-11-09T00:00:00Z",
+              detachedAt: "2026-11-09T01:00:00Z",
+            },
+          ],
+        };
+        assert.deepEqual(
+          (yield* policy.resolve({ thread, modelSelection })).additionalDirectories,
+          ["/api"],
+        );
+        const unsupported = yield* policy
+          .resolve({ thread, modelSelection: { instanceId: grokInstanceId, model: "test-model" } })
+          .pipe(Effect.flip);
+        assert.instanceOf(unsupported, RuntimePolicy.RuntimePolicyRepositoryAccessError);
+      }),
+  );
   it.effect("asks for Antigravity command approval when a stored Auto thread falls back", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;

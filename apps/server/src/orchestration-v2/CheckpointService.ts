@@ -112,6 +112,7 @@ export interface CheckpointServiceV2Shape {
     readonly rootNodeId: NodeId;
     readonly providerThreadId: ProviderThreadId;
     readonly cwd: string;
+    readonly repositoryAttachmentId?: string;
     readonly createdAt: DateTime.Utc;
   }) => Effect.Effect<OrchestrationV2CheckpointScope, CheckpointServiceV2Error>;
   readonly captureBaseline: (input: {
@@ -184,11 +185,17 @@ const makeRootRunScope = Effect.fn("CheckpointService.makeRootRunScope")(functio
   readonly rootNodeId: NodeId;
   readonly providerThreadId: ProviderThreadId;
   readonly cwd: string;
+  readonly repositoryAttachmentId?: string;
   readonly createdAt: DateTime.Utc;
 }) {
   const scopeId = yield* input.idAllocator.allocate.checkpointScope({
     threadId: input.threadId,
-    name: ROOT_CHECKPOINT_SCOPE_NAME,
+    name:
+      input.repositoryAttachmentId === undefined
+        ? ROOT_CHECKPOINT_SCOPE_NAME
+        : [ROOT_CHECKPOINT_SCOPE_NAME, input.repositoryAttachmentId, input.cwd, input.runId]
+            .map((part) => `${part.length}:${part}`)
+            .join(":"),
   });
   return {
     id: scopeId,
@@ -201,6 +208,9 @@ const makeRootRunScope = Effect.fn("CheckpointService.makeRootRunScope")(functio
     ordinalWithinParent: 0,
     advancesAppRunCount: true,
     cwd: input.cwd,
+    ...(input.repositoryAttachmentId === undefined
+      ? {}
+      : { repositoryAttachmentId: input.repositoryAttachmentId }),
     createdAt: input.createdAt,
   } satisfies OrchestrationV2CheckpointScope;
 });

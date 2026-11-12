@@ -39,7 +39,7 @@ export function useReviewCommentSelectionController(input: {
     selectedSection === null
       ? null
       : {
-          id: selectedSection.id,
+          id: selectedSection.commentId ?? selectedSection.id,
           content: selectedSection.source?.diffHash ?? selectedSection.diff,
         },
   );
@@ -101,8 +101,8 @@ export function useReviewCommentSelectionController(input: {
 
     if (gesture === "longPress") {
       startReviewCommentRange(scope, {
-        sectionId: selectedSection.id,
-        sectionTitle: selectedSection.title,
+        sectionId: selectedSection.commentId ?? selectedSection.id,
+        sectionTitle: selectedSection.commentTitle ?? selectedSection.title,
         filePath: target.filePath,
         lines: target.lines,
         lineIndex: target.lineIndex,
@@ -120,8 +120,8 @@ export function useReviewCommentSelectionController(input: {
     }
 
     setReviewCommentTarget(scope, {
-      sectionTitle: selectedSection.title,
-      sectionId: selectedSection.id,
+      sectionTitle: selectedSection.commentTitle ?? selectedSection.title,
+      sectionId: selectedSection.commentId ?? selectedSection.id,
       filePath: target.filePath,
       lines: target.lines,
       startIndex: target.lineIndex,

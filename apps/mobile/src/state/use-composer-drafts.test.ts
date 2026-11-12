@@ -1760,6 +1760,7 @@ describe("mobile composer drafts", () => {
               options: [{ id: "reasoningEffort", value: "xhigh" }],
             },
             runtimeMode: "approval-required",
+            repositoryProjectIds: ["extra-project"],
             interactionMode: "plan",
             workspaceSelection: {
               mode: "worktree",
@@ -1783,6 +1784,7 @@ describe("mobile composer drafts", () => {
         options: [{ id: "reasoningEffort", value: "xhigh" }],
       },
       runtimeMode: "approval-required",
+      repositoryProjectIds: ["extra-project"],
       interactionMode: "plan",
       workspaceSelection: {
         mode: "worktree",
@@ -1917,6 +1919,7 @@ describe("mobile composer drafts", () => {
       [key]: {
         ...getComposerDraftSnapshot(key),
         runtimeMode: "approval-required",
+        repositoryProjectIds: [ProjectId.make("extra-project")],
         workspaceSelection: { mode: "worktree", branch: "feature/a", worktreePath: null },
       },
     });
@@ -1929,6 +1932,7 @@ describe("mobile composer drafts", () => {
     expect(moved.runtimeMode).toBe("approval-required");
 
     expect(moved.workspaceSelection).toBeUndefined();
+    expect(moved.repositoryProjectIds).toBeUndefined();
     expect(moved.project).toEqual({ ...to, createdAt });
     expect(findNewTaskDraftKeys(appAtomRegistry.get(composerDraftsAtom), from)).toEqual([]);
     expect(findNewTaskDraftKeys(appAtomRegistry.get(composerDraftsAtom), to)).toEqual([key]);
@@ -2112,6 +2116,7 @@ describe("mobile composer drafts", () => {
       text: "send this",
       attachments: [],
       importedShareIds: ["share-1"],
+      repositoryProjectIds: [ProjectId.make("extra-project")],
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5.4",
@@ -2128,10 +2133,16 @@ describe("mobile composer drafts", () => {
       [draftKey]: {
         modelSelection: draft.modelSelection,
         workspaceSelection: draft.workspaceSelection,
+        repositoryProjectIds: draft.repositoryProjectIds,
         text: "",
         attachments: [],
       },
     });
+    expect(
+      clearComposerDraftContentState({ [draftKey]: draft }, draftKey, {
+        clearWorkspaceSelection: true,
+      })[draftKey],
+    ).not.toHaveProperty("repositoryProjectIds");
   });
 
   it("drops another environment's upload stamp when a draft moves across machines", () => {

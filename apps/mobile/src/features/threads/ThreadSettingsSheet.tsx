@@ -1,3 +1,4 @@
+import { NewTaskRepositorySelector, ThreadRepositorySelector } from "./ThreadRepositorySelector";
 import {
   getPromptControlledTraits,
   getTraitSelectChange,
@@ -257,6 +258,7 @@ type ThreadSettingsSubmenuPage =
   | { readonly kind: "runtime" };
 
 type ThreadSettingsSessionProps = {
+  readonly repositorySelector?: ReactNode;
   readonly environmentId: EnvironmentId | null;
   readonly projectId: ProjectId | null;
   readonly cwd: string | null;
@@ -283,6 +285,7 @@ export type ExistingThreadSettingsRouteParams = {
 };
 
 type ThreadSettingsSessionValue = {
+  readonly repositorySelector?: ReactNode;
   readonly environmentId: EnvironmentId | null;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
@@ -604,6 +607,7 @@ function ThreadSettingsSessionProvider(
     props.cwd && scannedInstanceId ? { instanceId: scannedInstanceId, cwd: props.cwd } : null;
 
   const value = {
+    repositorySelector: props.repositorySelector,
     environmentId,
     providerInstanceId: props.providerInstanceId,
     providerGroups,
@@ -859,6 +863,7 @@ function ThreadSettingsOptionsItem(props: {
 
   return (
     <View style={{ paddingBottom: insets.bottom + props.bottomInset + 12 }}>
+      {session.repositorySelector}
       <ChatGptSharingStatus provider={selectedProvider} />
       <Text className="px-5 pb-2 pt-2 text-sm font-t3-medium text-foreground-muted">Options</Text>
       <Animated.View
@@ -1403,6 +1408,7 @@ export function ExistingThreadSettingsRouteScreen({
 
   return (
     <ThreadSettingsPickerScreen
+      repositorySelector={<ThreadRepositorySelector thread={selectedThread} />}
       environmentId={selectedThread.environmentId}
       projectId={selectedThread.projectId}
       cwd={selectedThreadCwd}
@@ -1441,6 +1447,7 @@ export function NewTaskThreadSettingsRouteScreen() {
 
   return (
     <ThreadSettingsPickerScreen
+      repositorySelector={<NewTaskRepositorySelector />}
       environmentId={flow.selectedEnvironmentId}
       projectId={flow.selectedProject?.id ?? null}
       cwd={flow.workspaceCwd}

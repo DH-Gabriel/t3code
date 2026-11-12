@@ -105,6 +105,7 @@ import * as ProjectStore from "./ProjectStore.ts";
 import {
   isCheckpointRestoreIsolated,
   SHARED_WORKSPACE_RESTORE_MESSAGE,
+  MULTI_REPOSITORY_RESTORE_MESSAGE,
 } from "./CheckpointRestoreSafety.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import {
@@ -3466,6 +3467,61 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       { concurrency: 1, discard: true },
     );
 
+  const resolveRepositoryAttachments = Effect.fn("Orchestrator.resolveRepositoryAttachments")(
+    function* (
+      command: Extract<
+        OrchestrationV2Command,
+        { readonly type: "thread.create" | "thread.metadata.update" }
+      >,
+      primaryProjectId: OrchestrationV2AppThread["projectId"],
+      now: DateTime.Utc,
+      previous: OrchestrationV2AppThread["repositoryAttachments"] = [],
+    ) {
+      if (command.repositoryProjectIds === undefined) return previous;
+      const selectedProjects = yield* Effect.forEach(
+        [...new Set(command.repositoryProjectIds)].filter((id) => id !== primaryProjectId),
+        (projectId) =>
+          projects.get(projectId).pipe(
+            mapDispatchError(command),
+            Effect.flatMap((project) =>
+              Option.isSome(project) &&
+              project.value.deletedAt === null &&
+              project.value.archivedAt === null
+                ? Effect.succeed(project.value)
+                : Effect.fail(
+                    new OrchestratorDispatchError({
+                      commandId: command.commandId,
+                      commandType: command.type,
+                      cause: `Attached project ${projectId} is missing or archived.`,
+                    }),
+                  ),
+            ),
+          ),
+      );
+      const selectedPaths = new Set(selectedProjects.map((project) => project.workspaceRoot));
+      const timestamp = DateTime.formatIso(now);
+      const nextAttachments = (previous ?? []).map((attachment) => ({
+        ...attachment,
+        detachedAt: selectedPaths.has(attachment.checkoutPath)
+          ? null
+          : (attachment.detachedAt ?? timestamp),
+      }));
+      for (const project of selectedProjects) {
+        if (nextAttachments.some((attachment) => attachment.checkoutPath === project.workspaceRoot))
+          continue;
+        nextAttachments.push({
+          id: `${command.commandId}:repository:${project.projectId}`,
+          projectId: project.projectId,
+          checkoutPath: project.workspaceRoot,
+          repositoryIdentity: null,
+          attachedAt: timestamp,
+          detachedAt: null,
+        });
+      }
+      return nextAttachments;
+    },
+  );
+
   const dispatchThreadCreate = Effect.fn("orchestrationV2.dispatch.threadCreate")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -3492,6 +3548,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
 
     const now = yield* DateTime.now;
+    const repositoryAttachments = yield* resolveRepositoryAttachments(
+      command,
+      command.projectId,
+      now,
+    );
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
@@ -3505,6 +3566,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       interactionMode: command.interactionMode,
       branch: command.branch,
       worktreePath: command.worktreePath,
+      ...(command.repositoryProjectIds === undefined ? {} : { repositoryAttachments }),
       activeProviderThreadId: null,
       pullRequests: [],
       ...(command.linkOrigin === undefined ? {} : { linkOrigin: command.linkOrigin }),
@@ -4142,8 +4204,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "thread.archive" ||
       command.type === "thread.settle" ||
       (command.type === "thread.metadata.update" &&
-        command.worktreePath !== undefined &&
-        command.worktreePath !== thread.worktreePath);
+        (command.repositoryProjectIds !== undefined ||
+          (command.worktreePath !== undefined && command.worktreePath !== thread.worktreePath)));
     const providerContext = needsProviderState
       ? yield* projectionStore
           .getThreadProviderContext(
@@ -4194,8 +4256,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "thread.archive" || command.type === "thread.settle"
         ? (providerContext?.providerSessions ?? []).map((session) => session.id)
         : command.type === "thread.metadata.update" &&
-            command.worktreePath !== undefined &&
-            command.worktreePath !== thread.worktreePath
+            (command.repositoryProjectIds !== undefined ||
+              (command.worktreePath !== undefined && command.worktreePath !== thread.worktreePath))
           ? (providerContext?.providerSessions ?? []).map((session) => session.id)
           : command.type === "thread.runtime-mode.set"
             ? (providerContext?.providerSessions ?? [])
@@ -4225,6 +4287,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
 
     const now = yield* DateTime.now;
+    let repositoryAttachments = thread.repositoryAttachments;
+    if (command.type === "thread.metadata.update" && command.repositoryProjectIds !== undefined) {
+      const projection = yield* loadProjectionForCommand(command, ["runs", "runtimeRequests"]);
+      if (threadHasUnfinishedWork(projection)) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Finish or stop this thread before changing its attached projects.",
+        });
+      }
+      repositoryAttachments = yield* resolveRepositoryAttachments(
+        command,
+        thread.projectId,
+        now,
+        thread.repositoryAttachments,
+      );
+    }
     if (command.type === "thread.metadata.update" && command.limitRecovery != null) {
       const projection = yield* loadProjectionForCommand(
         command,
@@ -4506,6 +4585,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 : {}),
             ...(command.branch === undefined ? {} : { branch: command.branch }),
             ...(command.worktreePath === undefined ? {} : { worktreePath: command.worktreePath }),
+            ...(command.repositoryProjectIds === undefined ? {} : { repositoryAttachments }),
             ...(command.linkedPullRequest === undefined
               ? {}
               : {
@@ -8994,7 +9074,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
-        ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
+        ...(command.workspaceStrategy === undefined
+          ? {}
+          : { branch: null, worktreePath: null, repositoryAttachments: [] }),
       };
       const task: OrchestrationV2Subagent = {
         id: taskNodeId,
@@ -13307,6 +13389,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
       if (command.restoreFiles !== false) {
+        if ((projection.thread.repositoryAttachments?.length ?? 0) > 0) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: MULTI_REPOSITORY_RESTORE_MESSAGE,
+          });
+        }
         const isolated = yield* isCheckpointRestoreIsolated(projection.thread, targetScope, {
           projects,
           path,

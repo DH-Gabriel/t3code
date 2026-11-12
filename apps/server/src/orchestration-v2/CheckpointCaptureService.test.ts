@@ -167,6 +167,12 @@ it.layer(layerProjectionStoreTest)("CheckpointCaptureServiceV2", (it) => {
           files: [],
           capturedAt: now,
         };
+        const attachedScope = {
+          ...scope,
+          id: CheckpointScopeId.make("scope:checkpoint-capture-attached"),
+          cwd: "/attached",
+          repositoryAttachmentId: "attachment:second",
+        };
 
         yield* projectionStore.apply({
           id: EventId.make("event:checkpoint-capture:thread"),
@@ -250,6 +256,26 @@ it.layer(layerProjectionStoreTest)("CheckpointCaptureServiceV2", (it) => {
           occurredAt: now,
           payload: readyBaseline,
         });
+        yield* projectionStore.apply({
+          id: EventId.make("event:checkpoint-capture:attached-scope"),
+          type: "checkpoint-scope.created",
+          threadId,
+          runId,
+          nodeId: rootNodeId,
+          occurredAt: now,
+          payload: attachedScope,
+        });
+        yield* projectionStore.apply({
+          id: EventId.make("event:checkpoint-capture:attached-baseline"),
+          type: "checkpoint.captured",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...readyBaseline,
+            id: CheckpointId.make("checkpoint:attached-baseline"),
+            scopeId: attachedScope.id,
+          },
+        });
         const sql = yield* SqlClient.SqlClient;
         yield* sql`INSERT OR REPLACE INTO orchestration_v2_projection_turn_items
           (turn_item_id, thread_id, run_id, node_id, provider_thread_id, provider_turn_id,
@@ -278,7 +304,17 @@ it.layer(layerProjectionStoreTest)("CheckpointCaptureServiceV2", (it) => {
                         Layer.mock(CheckpointStore.CheckpointStore)({
                           listAuthoredPaths: () => Effect.succeed(null),
                           isGitRepository: () => Effect.succeed(true),
-                          captureCheckpoint: () => Effect.void,
+                          captureCheckpoint: ({ cwd }) =>
+                            cwd === attachedScope.cwd
+                              ? Effect.fail(
+                                  new VcsProcessTimeoutError({
+                                    operation: "test.captureCheckpoint",
+                                    command: "git",
+                                    cwd,
+                                    timeoutMs: 30000,
+                                  }),
+                                )
+                              : Effect.void,
                           hasCheckpointRef: () =>
                             Effect.fail(
                               new VcsProcessTimeoutError({
@@ -297,7 +333,17 @@ it.layer(layerProjectionStoreTest)("CheckpointCaptureServiceV2", (it) => {
                       Effect.die(
                         "baseline materialization must be skipped when ordinal 0 is ready",
                       ),
-                    capture: () => Effect.succeed(captured),
+                    capture: ({ scope: target }) =>
+                      Effect.succeed(
+                        target.id === attachedScope.id
+                          ? {
+                              ...captured,
+                              id: CheckpointId.make("checkpoint:attached-error"),
+                              scopeId: attachedScope.id,
+                              status: "error" as const,
+                            }
+                          : captured,
+                      ),
                   }),
               Layer.mock(EventSink.EventSinkV2)({
                 commitCommand: (input) =>
@@ -331,6 +377,24 @@ it.layer(layerProjectionStoreTest)("CheckpointCaptureServiceV2", (it) => {
           }
           assert.equal(runUpdated.payload.status, "completed");
           const capturedEvent = events.find((event) => event.type === "checkpoint.captured");
+          const attachedEvent = events.find(
+            (event) =>
+              event.type === "checkpoint.captured" && event.payload.scopeId === attachedScope.id,
+          );
+          assert.isDefined(attachedEvent);
+          if (attachedEvent?.type === "checkpoint.captured") {
+            assert.equal(attachedEvent.payload.status, "error");
+          }
+          const failedCaptureItem = events.find(
+            (event) =>
+              event.type === "turn-item.updated" &&
+              event.payload.type === "checkpoint" &&
+              event.payload.scopeId === attachedScope.id,
+          );
+          assert.equal(failedCaptureItem?.type, "turn-item.updated");
+          if (failedCaptureItem?.type === "turn-item.updated") {
+            assert.equal(failedCaptureItem.payload.status, "failed");
+          }
           assert.equal(
             runUpdated.payload.checkpointId,
             refLookupFails ? capturedEvent?.payload.id : captured.id,

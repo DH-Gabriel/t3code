@@ -1079,7 +1079,10 @@ describe("deriveMessagesTimelineRows", () => {
       ],
       isWorking: false,
       activeTurnStartedAt: null,
-      turnDiffSummaries: [assistantTurnDiffSummary],
+      turnDiffSummaries: [
+        assistantTurnDiffSummary,
+        { ...assistantTurnDiffSummary, repositoryAttachmentId: "backend" },
+      ],
       supportsConversationRollback: true,
       threadStartCheckpointAvailable: true,
     });
@@ -1094,7 +1097,10 @@ describe("deriveMessagesTimelineRows", () => {
     );
 
     expect(userRow?.revertTurnCount).toBe(0);
-    expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
+    expect(assistantRow?.assistantTurnDiffSummaries).toEqual([
+      assistantTurnDiffSummary,
+      { ...assistantTurnDiffSummary, repositoryAttachmentId: "backend" },
+    ]);
   });
 
   it("folds the first assistant message and settled work before the terminal response", () => {

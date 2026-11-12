@@ -231,6 +231,18 @@ export function resolveProactiveTurnDiffAction(input: {
   return totals.count >= 3 || totals.additions + totals.deletions >= 50 ? "open" : "ignore";
 }
 
+export function resolveThreadDiffAvailable(input: {
+  readonly isServerThread: boolean;
+  readonly isGitRepo: boolean;
+  readonly hasAttachedRepository: boolean;
+  readonly hasCheckpointDiff: boolean;
+}) {
+  return (
+    input.isServerThread &&
+    (input.isGitRepo || input.hasAttachedRepository || input.hasCheckpointDiff)
+  );
+}
+
 export function codexArtifactTemplatePromptToAppend(
   currentDraft: string,
   template: CodexArtifactTemplate,

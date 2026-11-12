@@ -12,7 +12,6 @@ import { lastReviewGitSectionsAtom, reviewEnvironment } from "../../state/review
 import { lastReviewTurnDiffsAtom } from "../../state/reviewTurnDiffs";
 import { environmentSession } from "../../state/session";
 import { useSelectedThreadProjection } from "../../state/use-thread-detail";
-import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import {
   buildReviewSectionItems,
   getReadyReviewCheckpoints,
@@ -37,6 +36,11 @@ export function useReviewSections(input: {
   readonly environmentId?: EnvironmentId;
   readonly threadId?: ThreadId;
   readonly reviewCache: ReviewCacheForThread;
+  readonly cwd: string | null;
+  readonly historical?: boolean;
+  readonly checkoutKey?: string;
+  readonly baseRef: string | null;
+  readonly commitSha: string | null;
 }) {
   const { environmentId, reviewCache, threadId } = input;
   const enabled = input.enabled ?? true;
@@ -52,41 +56,79 @@ export function useReviewSections(input: {
   });
   const { canReadFiles } = fileAccess;
   const selectedThread = useSelectedThreadProjection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const selectedThreadCwd = input.cwd;
   const diffPreview = useEnvironmentQuery(
-    canReadFiles && enabled && environmentId !== undefined && selectedThreadCwd !== null
+    !input.historical &&
+      canReadFiles &&
+      enabled &&
+      environmentId !== undefined &&
+      selectedThreadCwd !== null
       ? reviewEnvironment.diffPreview({
           environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: {
+            cwd: selectedThreadCwd,
+            ...(input.baseRef ? { baseRef: input.baseRef } : {}),
+            ...(input.commitSha ? { commitSha: input.commitSha } : {}),
+          },
+        })
+      : null,
+  );
+  const commits = useEnvironmentQuery(
+    !input.historical &&
+      canReadFiles &&
+      enabled &&
+      environmentId !== undefined &&
+      selectedThreadCwd !== null
+      ? reviewEnvironment.branchCommits({
+          environmentId,
+          input: { cwd: selectedThreadCwd, ...(input.baseRef ? { baseRef: input.baseRef } : {}) },
         })
       : null,
   );
   const lastGitSections = useAtomValue(
     environmentId !== undefined && selectedThreadCwd !== null
-      ? lastReviewGitSectionsAtom(environmentId, selectedThreadCwd)
+      ? lastReviewGitSectionsAtom(environmentId, selectedThreadCwd, input.baseRef, input.commitSha)
       : NO_GIT_SECTIONS_ATOM,
   );
 
   const lastTurnDiffs = useAtomValue(
     environmentId !== undefined && threadId !== undefined
-      ? lastReviewTurnDiffsAtom(environmentId, threadId)
+      ? lastReviewTurnDiffsAtom(environmentId, threadId, input.checkoutKey)
       : NO_TURN_DIFFS_ATOM,
   );
 
-  const readyCheckpoints = getReadyReviewCheckpoints(
-    selectedThread === null ? [] : deriveThreadCheckpointSummaries(selectedThread.projection),
+  const scopeIds = new Set(
+    selectedThread?.projection.checkpointScopes
+      .filter(
+        (scope) => (scope.repositoryAttachmentId ?? "primary") === (input.checkoutKey ?? "primary"),
+      )
+      .map((scope) => scope.id),
   );
+  const checkpoints =
+    selectedThread === null
+      ? []
+      : deriveThreadCheckpointSummaries({
+          ...selectedThread.projection,
+          checkpoints: selectedThread.projection.checkpoints.filter((checkpoint) =>
+            scopeIds.has(checkpoint.scopeId),
+          ),
+        });
+  const readyCheckpoints = getReadyReviewCheckpoints(checkpoints);
   const checkpointBySectionId = new Map(
     readyCheckpoints.map((checkpoint) => [getReviewSectionIdForCheckpoint(checkpoint), checkpoint]),
   );
   // Turns show their last answered diff; the active turn's live query below overrides it.
   // Section ids and the selection do not depend on the live query, so they are resolved first.
   const cachedSections = buildReviewSectionItems({
-    checkpoints: readyCheckpoints,
+    checkoutKey: input.checkoutKey,
+    ...(selectedThreadCwd ? { checkoutPath: selectedThreadCwd } : {}),
+    checkpoints,
     gitSections:
-      canReadFiles || fileAccess.isPending ? (diffPreview.data?.sources ?? lastGitSections) : [],
+      !input.historical && (canReadFiles || fileAccess.isPending)
+        ? (diffPreview.data?.sources ?? lastGitSections)
+        : [],
     turnDiffById: reviewTurnDiffsBySectionId(readyCheckpoints, lastTurnDiffs),
-    loadingGitSections: fileAccess.isPending || diffPreview.isPending,
+    loadingGitSections: !input.historical && (fileAccess.isPending || diffPreview.isPending),
   });
   const selectedSectionId = resolveReviewSelectedSectionId(
     cachedSections,
@@ -106,6 +148,7 @@ export function useReviewSections(input: {
       enabled && activeCheckpoint ? Math.max(0, activeCheckpoint.checkpointTurnCount - 1) : null,
     toTurnCount: enabled ? (activeCheckpoint?.checkpointTurnCount ?? null) : null,
     ignoreWhitespace: false,
+    ...(input.checkoutKey ? { repositoryAttachmentId: input.checkoutKey } : {}),
   });
 
   const reviewSections = cachedSections.map((section): ReviewSectionItem => {
@@ -142,9 +185,11 @@ export function useReviewSections(input: {
   };
 
   return {
+    canReadLiveDiffs: !input.historical && canReadFiles,
+    commits: commits.data?.commits ?? [],
     error:
       diffPreview.error ??
-      activeTurnDiff.error ??
+      (selectedSection?.kind === "turn" ? activeTurnDiff.error : null) ??
       (selectedSection === null && !fileAccess.isPending && !canReadFiles
         ? (fileAccess.error ?? "This connection cannot read local diffs.")
         : null),

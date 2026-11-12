@@ -36,6 +36,13 @@ import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { RelativeTime } from "~/components/RelativeTime";
 import { Button } from "../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "../ui/menu";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -155,7 +162,7 @@ function LinkRowImpl({
       )}
       <a
         href={link.url}
-        onClick={(event) => openPrLink(event, link.url, threadRef)}
+        onClick={projectId === null ? undefined : (event) => openPrLink(event, link.url, threadRef)}
         // Outside drops use the URL; the composer uses this context-chip payload.
         onDragStart={
           snapshot === null
@@ -326,7 +333,12 @@ function LinkRowImpl({
               <LinkIcon className="size-3.5" />
               Copy link
             </MenuItem>
-            <MenuItem onClick={(event) => openPrLink(event, link.url, threadRef)}>
+            <MenuItem
+              render={<a href={link.url} target="_blank" rel="noopener noreferrer" />}
+              onClick={
+                projectId === null ? undefined : (event) => openPrLink(event, link.url, threadRef)
+              }
+            >
               <ArrowUpRightIcon className="size-3.5" />
               Open
             </MenuItem>
@@ -376,6 +388,7 @@ export function ThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
 
 function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const thread = useThreadShell(threadRef);
+  const [repositoryFilter, setRepositoryFilter] = useState("all");
   const projects = useProjects();
   const environmentProjects = projects
     .filter((project) => project.environmentId === threadRef.environmentId)
@@ -383,8 +396,15 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
       left.id === thread?.projectId ? -1 : right.id === thread?.projectId ? 1 : 0,
     );
   // Derive lines before later hooks to preserve compiler caching and avoid LegendList renders.
-  const links = visibleThreadPullRequests(thread?.pullRequests ?? []);
-  const lines = pullRequestListLines(resolveThreadPullRequestChains(links));
+  const allLinks = visibleThreadPullRequests(thread?.pullRequests ?? []);
+  const repositoryKey = (link: ThreadPullRequestLink) => `${link.host}/${link.repository}`;
+  const repositories = [...new Set(allLinks.map(repositoryKey))].sort();
+  const filter = repositories.includes(repositoryFilter) ? repositoryFilter : "all";
+  const links =
+    filter === "all" ? allLinks : allLinks.filter((link) => repositoryKey(link) === filter);
+  const lines = pullRequestListLines(resolveThreadPullRequestChains(links)).toSorted(
+    (left, right) => repositoryKey(left.link).localeCompare(repositoryKey(right.link)),
+  );
   const openCount = links.filter(
     (link) => link.snapshot === null || link.snapshot.state === "open",
   ).length;
@@ -445,27 +465,56 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
   return (
     <PullRequestSpeedModeContext value={speedMode}>
       <div className="flex h-full min-h-0 flex-col">
+        {repositories.length > 1 ? (
+          <div className="border-b border-border/60 p-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button size="xs" variant="secondary" />}
+                aria-label="Pull request repository"
+              >
+                {filter === "all" ? "All repositories" : filter}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuRadioGroup value={filter} onValueChange={setRepositoryFilter}>
+                  <DropdownMenuRadioItem value="all" closeOnClick>
+                    All repositories
+                  </DropdownMenuRadioItem>
+                  {repositories.map((repository) => (
+                    <DropdownMenuRadioItem key={repository} value={repository} closeOnClick>
+                      {repository}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ) : null}
         {/* Threads that run a stack or a sweep link hundreds of pull requests; only the rows in
           view are mounted. */}
         <LegendList<PullRequestListLine>
           data={lines}
           keyExtractor={lineKey}
           extraData={rowInputs}
-          renderItem={({ item: line }) => (
-            <LinkRow
-              line={line}
-              threadRef={threadRef}
-              projectId={
-                capabilities !== undefined
-                  ? (findProjectForChangeRequest(environmentProjects, line.link)?.id ??
-                    thread?.projectId ??
-                    null)
-                  : null
-              }
-              speedMode={speedMode}
-              onUnlink={handleUnlink}
-              onSetWatching={supportsWatch ? handleSetWatching : null}
-            />
+          renderItem={({ item: line, index }) => (
+            <div>
+              {index === 0 || repositoryKey(lines[index - 1]!.link) !== repositoryKey(line.link) ? (
+                <p className="px-2 pb-1 pt-3 text-xs font-medium text-muted-foreground">
+                  {line.link.repository}
+                </p>
+              ) : null}
+              <LinkRow
+                line={line}
+                threadRef={threadRef}
+                projectId={
+                  capabilities !== undefined
+                    ? (findProjectForChangeRequest(environmentProjects, line.link)?.id ?? null)
+                    : null
+                }
+                speedMode={speedMode}
+                onUnlink={handleUnlink}
+                onSetWatching={supportsWatch ? handleSetWatching : null}
+              />
+            </div>
           )}
           estimatedItemSize={44}
           drawDistance={440}
