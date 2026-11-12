@@ -9,6 +9,7 @@ import { configuredHostedAppUrl } from "../hostedPairing";
 import { announcedRun, isDetailBehindShell } from "./chat/threadActivityAnnouncement";
 import {
   deriveAvailableRevertTurnCounts,
+  resolveThreadDiffAvailable,
   deriveThreadPendingBackgroundTasks,
   presentThreadShellFromProjection,
 } from "./ChatView.logic";
@@ -248,6 +249,7 @@ import {
   resolveThreadDetailRef,
   useEnvironmentSupportsServerBrowser,
   useProject,
+  useProjects,
   useQuietThreadProjection,
   useThreadUpdatedAt,
   useThreadLastVisitedAt,
@@ -277,6 +279,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ThreadProjectPicker } from "./chat/ThreadProjects";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -473,6 +476,9 @@ export default function ChatView(props: ChatViewProps) {
       : draftId
         ? store.getDraftSession(draftId)
         : null,
+  );
+  const repositorySelectionPending = useComposerDraftStore((store) =>
+    store.isRepositorySelectionPending(baseComposerDraftTarget),
   );
   const serverThreadShell = useQuietThreadShell(routeThreadRef);
   const routeThreadDetailRef = resolveThreadDetailRef(routeThreadRef, {
@@ -1099,6 +1105,7 @@ export default function ChatView(props: ChatViewProps) {
       ? scopeProjectRef(activeThreadEnvironmentId, activeThreadProjectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  const projects = useProjects();
   const activeProjectSettings = resolveProjectSettings(
     settings,
     activeProject?.id ?? null,
@@ -1698,6 +1705,14 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
   const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  const diffAvailable = resolveThreadDiffAvailable({
+    isServerThread,
+    isGitRepo,
+    hasAttachedRepository: (activeThreadShell?.repositoryAttachments ?? []).some(
+      (attachment) => attachment.detachedAt === null,
+    ),
+    hasCheckpointDiff: turnDiffSummaries.some((summary) => summary.status === "ready"),
+  });
   // Provider-native subagents cannot take messages; approvals and questions go to the top-level parent.
   const showProviderSubagentBar = isProviderSubagent;
   const composerMounted = !showProviderSubagentBar;
@@ -1943,8 +1958,7 @@ export default function ChatView(props: ChatViewProps) {
     (activeThreadShell ?? activeThread)?.pullRequests ?? [],
   );
   const visiblePullRequestCount = visiblePullRequests.length;
-  const pullRequestsSurfaceAvailable =
-    isServerThread && supportsThreadPullRequests && visiblePullRequestCount > 0;
+  const pullRequestsSurfaceAvailable = isServerThread && supportsThreadPullRequests;
   const { state: deviceState, loaded: deviceStateLoaded } = useDeviceState(
     activeThreadRef?.environmentId ?? null,
   );
@@ -1968,11 +1982,12 @@ export default function ChatView(props: ChatViewProps) {
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
   });
-  const proactivePullRequestsKey = pullRequestsSurfaceAvailable
-    ? JSON.stringify(
-        visiblePullRequests.map((link) => [link.host, link.repository, link.number]).sort(),
-      )
-    : linkedThreadPullRequestKey;
+  const proactivePullRequestsKey =
+    pullRequestsSurfaceAvailable && visiblePullRequestCount > 0
+      ? JSON.stringify(
+          visiblePullRequests.map((link) => [link.host, link.repository, link.number]).sort(),
+        )
+      : linkedThreadPullRequestKey;
   const activeRunningTurnId = activeRuntime?.activeRunId ?? null;
   useProactivePanels({
     threadRef: isServerThread && !embedded ? activeThreadRef : null,
@@ -2316,12 +2331,15 @@ export default function ChatView(props: ChatViewProps) {
     void copyThreadReference(activeThreadReferenceCopyTarget);
   };
   const pullRequestPanelTarget = activeThread
-    ? threadPullRequestPanelTarget({
-        projectId: activeThread.projectId,
-        pullRequests: visiblePullRequests,
-        linkedPullRequest: linkedThreadPullRequest,
-        branchPullRequest: activeThreadShell?.branchPullRequest ?? activeThread.branchPullRequest,
-      })
+    ? threadPullRequestPanelTarget(
+        {
+          projectId: activeThread.projectId,
+          pullRequests: visiblePullRequests,
+          linkedPullRequest: linkedThreadPullRequest,
+          branchPullRequest: activeThreadShell?.branchPullRequest ?? activeThread.branchPullRequest,
+        },
+        projects.filter((project) => project.environmentId === activeThread.environmentId),
+      )
     : null;
   const {
     activateRightPanelSurfaceStable,
@@ -2354,7 +2372,7 @@ export default function ChatView(props: ChatViewProps) {
     threadPanelPresentation,
     isServerThread,
     embedded,
-    isGitRepo,
+    diffAvailable,
     browserAvailable,
     canOperatePreview,
     diffOpen,
@@ -3322,6 +3340,11 @@ export default function ChatView(props: ChatViewProps) {
           </header>
         )}
 
+        {isLocalDraftThread && draftId ? (
+          <div className="flex shrink-0 justify-end px-3 py-1">
+            <ThreadProjectPicker draftId={draftId} />
+          </div>
+        ) : null}
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
             findOptions={{
@@ -3586,6 +3609,7 @@ export default function ChatView(props: ChatViewProps) {
                                 isCompacting={isCompacting}
                                 canInterrupt={canInterruptRunningThread}
                                 isSendBusy={
+                                  repositorySelectionPending ||
                                   (isSendBusy && !sendQueuesBehindSetup) ||
                                   (setupQueueSendThreadKey !== null &&
                                     setupQueueSendThreadKey === activeThreadKey) ||
@@ -3597,17 +3621,19 @@ export default function ChatView(props: ChatViewProps) {
                                 sendDisabledReason={
                                   !canOperateThread
                                     ? "This connection cannot change threads."
-                                    : isEnvironmentChanging
-                                      ? "Preparing machine"
-                                      : isRevertingCheckpoint
-                                        ? "Rewinding conversation"
-                                        : feedbackUploading
-                                          ? "Sending feedback"
-                                          : threadDetailLoading
-                                            ? "Messages loading"
-                                            : worktreeSetupBlocksSend
-                                              ? "Preparing worktree"
-                                              : projectCloneSendBlockReason
+                                    : repositorySelectionPending
+                                      ? "Adding repository"
+                                      : isEnvironmentChanging
+                                        ? "Preparing machine"
+                                        : isRevertingCheckpoint
+                                          ? "Rewinding conversation"
+                                          : feedbackUploading
+                                            ? "Sending feedback"
+                                            : threadDetailLoading
+                                              ? "Messages loading"
+                                              : worktreeSetupBlocksSend
+                                                ? "Preparing worktree"
+                                                : projectCloneSendBlockReason
                                 }
                                 isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                                 bannerItems={
@@ -3872,9 +3898,7 @@ export default function ChatView(props: ChatViewProps) {
                     ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
                     : {})}
                   onComposerFocusRequest={scheduleComposerFocusStable}
-                  {...(isServerThread && isGitRepo
-                    ? { onOpenChanges: openChangesFromThreadPanelStable }
-                    : {})}
+                  {...(diffAvailable ? { onOpenChanges: openChangesFromThreadPanelStable } : {})}
                   onRunProjectScript={runProjectScriptStable}
                   onAddProjectScript={saveProjectScriptStable}
                   onUpdateProjectScript={updateProjectScriptStable}
@@ -3967,7 +3991,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
-          diffAvailable={isServerThread && isGitRepo}
+          diffAvailable={diffAvailable}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}

@@ -65,8 +65,15 @@ export const layer: Layer.Layer<
       readonly runId: RunId;
       readonly scopeId: CheckpointScopeId;
     }) {
-      const { run, rootNode, scope, providerThread, readyCheckpointOrdinals, sideChat } =
-        yield* projections.getCheckpointCaptureContext(input.threadId, input);
+      const {
+        run,
+        rootNode,
+        scope,
+        providerThread,
+        readyCheckpointOrdinals,
+        repositoryScopes,
+        sideChat,
+      } = yield* projections.getCheckpointCaptureContext(input.threadId, input);
       // Stopped runs remain terminal; their checkpoint is the next message's rollback point.
       const stopped = run?.status === "interrupted" || run?.status === "cancelled";
 
@@ -101,34 +108,42 @@ export const layer: Layer.Layer<
 
       const capturedAt = yield* DateTime.now;
       const baselineOrdinalWithinScope = Math.max(0, run.ordinal - 1);
-      const hasReadyCheckpoint = (ordinalWithinScope: number) =>
-        readyCheckpointOrdinals.includes(ordinalWithinScope);
-      // The baselines this capture materializes are attributed to the run materializing them. The
-      // thread's scope may already be a later run's: one queued meanwhile, or sent after Stop.
-      const materializeBaseline = (ordinalWithinScope: number) =>
-        checkpoints.materializeBaselineCheckpoint({
-          scope,
-          ordinalWithinScope,
+      const capturedCheckpoints: OrchestrationV2Checkpoint[] = [];
+      const turnCheckpoints: OrchestrationV2Checkpoint[] = [];
+      for (const target of [{ scope, readyCheckpointOrdinals }, ...(repositoryScopes ?? [])]) {
+        const hasReadyCheckpoint = (ordinalWithinScope: number) =>
+          target.readyCheckpointOrdinals.includes(ordinalWithinScope);
+        const materializeBaseline = (ordinalWithinScope: number) =>
+          checkpoints.materializeBaselineCheckpoint({
+            scope: target.scope,
+            ordinalWithinScope,
+            nodeId: rootNode.id,
+            capturedAt: run.requestedAt,
+            forceMissing: sideChat,
+          });
+        if (
+          target.scope.repositoryAttachmentId === undefined &&
+          baselineOrdinalWithinScope !== 0 &&
+          !hasReadyCheckpoint(0)
+        ) {
+          capturedCheckpoints.push(yield* materializeBaseline(0));
+        }
+        if (!hasReadyCheckpoint(baselineOrdinalWithinScope)) {
+          capturedCheckpoints.push(yield* materializeBaseline(baselineOrdinalWithinScope));
+        }
+        const captured = yield* checkpoints.capture({
+          scope: target.scope,
+          runId: run.id,
           nodeId: rootNode.id,
-          capturedAt: run.requestedAt,
+          ordinalWithinScope: run.ordinal,
+          appRunOrdinal: run.ordinal,
+          capturedAt,
           forceMissing: sideChat,
         });
-      const threadStartCheckpoint =
-        baselineOrdinalWithinScope === 0 || hasReadyCheckpoint(0)
-          ? null
-          : yield* materializeBaseline(0);
-      const baselineCheckpoint = hasReadyCheckpoint(baselineOrdinalWithinScope)
-        ? null
-        : yield* materializeBaseline(baselineOrdinalWithinScope);
-      const checkpoint = yield* checkpoints.capture({
-        scope,
-        runId: run.id,
-        nodeId: rootNode.id,
-        ordinalWithinScope: run.ordinal,
-        appRunOrdinal: run.ordinal,
-        capturedAt,
-        forceMissing: sideChat,
-      });
+        capturedCheckpoints.push(captured);
+        turnCheckpoints.push(captured);
+      }
+      const checkpoint = turnCheckpoints[0]!;
       // Omit delegatedCompletion to preserve cohort writes made after capture loaded the run.
       const { delegatedCompletion: _delegatedCompletion, ...runWithoutDelegatedCompletion } = run;
       const commandId = CommandId.make(`command:effect:checkpoint.capture:${run.id}`);
@@ -139,63 +154,43 @@ export const layer: Layer.Layer<
         acceptedAt: capturedAt,
         effects: [],
         events: [
-          ...(threadStartCheckpoint === null
-            ? []
-            : [
-                {
-                  id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
-                  type: "checkpoint.captured" as const,
-                  threadId: input.threadId,
-                  nodeId: threadStartCheckpoint.nodeId,
-                  driver: providerThread.driver,
-                  providerInstanceId: run.providerInstanceId,
-                  occurredAt: capturedAt,
-                  payload: threadStartCheckpoint,
-                },
-              ]),
-          ...(baselineCheckpoint === null
-            ? []
-            : [
-                {
-                  id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
-                  type: "checkpoint.captured" as const,
-                  threadId: input.threadId,
-                  nodeId: baselineCheckpoint.nodeId,
-                  driver: providerThread.driver,
-                  providerInstanceId: run.providerInstanceId,
-                  occurredAt: capturedAt,
-                  payload: baselineCheckpoint,
-                },
-              ]),
-          {
-            id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
-            type: "checkpoint.captured",
-            threadId: input.threadId,
-            runId: run.id,
-            nodeId: rootNode.id,
-            driver: providerThread.driver,
-            providerInstanceId: run.providerInstanceId,
-            occurredAt: capturedAt,
-            payload: checkpoint,
-          },
-          {
-            id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
-            type: "turn-item.updated",
-            threadId: input.threadId,
-            runId: run.id,
-            nodeId: rootNode.id,
-            driver: providerThread.driver,
-            providerInstanceId: run.providerInstanceId,
-            occurredAt: capturedAt,
-            payload: makeCheckpointTurnItem({
-              idAllocator: ids,
-              run,
-              rootNode,
-              providerThread,
-              checkpoint,
-              completedAt: capturedAt,
+          ...(yield* Effect.forEach(capturedCheckpoints, (captured) =>
+            Effect.gen(function* () {
+              return {
+                id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
+                type: "checkpoint.captured" as const,
+                threadId: input.threadId,
+                ...(captured.runId === null ? {} : { runId: captured.runId }),
+                nodeId: captured.nodeId,
+                driver: providerThread.driver,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: capturedAt,
+                payload: captured,
+              };
             }),
-          },
+          )),
+          ...(yield* Effect.forEach(turnCheckpoints, (captured) =>
+            Effect.gen(function* () {
+              return {
+                id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
+                type: "turn-item.updated" as const,
+                threadId: input.threadId,
+                runId: run.id,
+                nodeId: rootNode.id,
+                driver: providerThread.driver,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: capturedAt,
+                payload: makeCheckpointTurnItem({
+                  idAllocator: ids,
+                  run,
+                  rootNode,
+                  providerThread,
+                  checkpoint: captured,
+                  completedAt: capturedAt,
+                }),
+              };
+            }),
+          )),
           {
             id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
             type: "run.updated",
@@ -271,8 +266,8 @@ function makeCheckpointTurnItem(input: {
     nativeItemRef: null,
     parentItemId: null,
     ordinal: input.run.ordinal * 100 + 99,
-    status: "completed",
-    title: null,
+    status: input.checkpoint.status === "error" ? "failed" : "completed",
+    title: input.checkpoint.status === "error" ? "Repository checkpoint capture failed" : null,
     startedAt: input.completedAt,
     completedAt: input.completedAt,
     updatedAt: input.completedAt,

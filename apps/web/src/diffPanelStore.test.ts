@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   resolveToolCallDiffTarget,
+  selectThreadDiffPanelSelection,
   useDiffPanelSessionStore,
   useDiffPanelStore,
 } from "./diffPanelStore";
@@ -14,6 +15,7 @@ describe("diffPanelStore", () => {
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
+      repositoryByThreadKey: {},
     });
     useDiffPanelSessionStore.setState({ collapsedFileKeysByScopeKey: {} });
   });
@@ -114,5 +116,31 @@ describe("diffPanelStore", () => {
       new Set(),
     );
     expect(defaults).toEqual(new Set(["src/app.ts", "src/index.ts"]));
+  });
+
+  it("keeps each checkout's comparison and scope when switching repositories and cleans them with the thread", () => {
+    const ref = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
+    const store = useDiffPanelStore.getState();
+    store.selectBranchBaseRef(ref, "main");
+    store.selectRepository(ref, "backend");
+    store.selectBranchBaseRef(ref, "release");
+    store.selectGitScope(ref, "unstaged");
+    store.selectRepository(ref, "primary");
+    expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref)).toEqual({
+      kind: "branch",
+      baseRef: "main",
+    });
+    store.selectRepository(ref, "backend");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref, "backend"),
+    ).toEqual({ kind: "unstaged" });
+    store.selectGitScope(ref, "branch");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref, "backend"),
+    ).toEqual({ kind: "branch", baseRef: "release" });
+    store.removeThread(ref);
+    expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
+    expect(useDiffPanelStore.getState().branchBaseRefByThreadKey).toEqual({});
+    expect(useDiffPanelStore.getState().repositoryByThreadKey).toEqual({});
   });
 });

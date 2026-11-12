@@ -6,6 +6,7 @@ import {
   AuthFilesystemReadScope,
   EnvironmentId,
   ProjectId,
+  ProviderInstanceId,
   type VcsListRefsResult,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -203,7 +204,7 @@ function setup() {
     return key;
   });
   mocks.retargetDraft.mockImplementation((key, target) =>
-    write(key, { project: target, workspaceSelection: undefined }),
+    write(key, { project: target, workspaceSelection: undefined, repositoryProjectIds: undefined }),
   );
   mocks.writeSettings.mockImplementation(write);
   mocks.writeText.mockImplementation((key, text) => write(key, { text }));
@@ -276,10 +277,39 @@ it("owns a status stream only while the draft is active, retaining draft choices
   expect(screen.events).toEqual(["start:/a"]);
   const draftKey = screen.current.draftKey!;
   act(() => screen.current.setPrompt("keep this draft"));
+  act(() => screen.current.setRepositoryProjectIds([screen.projects[1]!.id]));
+  mocks.projects.mockReturnValue([screen.projects[1], screen.projects[0], screen.projects[2]]);
+  await screen.render(true);
+  expect(screen.current.selectedProject).toEqual(screen.projects[0]);
+  expect(screen.snapshot(draftKey).repositoryProjectIds).toEqual([screen.projects[1]!.id]);
+  act(() =>
+    mocks.writeSettings(draftKey, {
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6-sol" },
+    }),
+  );
+  const buildMessage = screen.current.buildPendingTaskMessage;
+  const metadata = {
+    threadId: "thread",
+    messageId: "message",
+    commandId: "command",
+    createdAt: "2026-11-09T00:00:00Z",
+  };
+  expect(buildMessage(metadata)?.creation?.repositoryProjectIds).toEqual([screen.projects[1]!.id]);
+  act(() => screen.current.setRepositorySelectionPending(true));
+  expect(screen.current.repositorySelectionPending).toBe(true);
+  expect(buildMessage(metadata)).toBeNull();
+  act(() => screen.current.setRepositorySelectionPending(false));
+  expect(screen.current.repositorySelectionPending).toBe(false);
+  expect(buildMessage(metadata)?.creation?.repositoryProjectIds).toEqual([screen.projects[1]!.id]);
 
+  const finishPreviousRepositorySelection = screen.current.setRepositoryProjectIds;
   await act(async () => screen.current.setProject(screen.projects[1]!));
   expect(screen.current.prompt).toBe("keep this draft");
   expect(screen.current.draftKey).toBe(draftKey);
+  expect(screen.snapshot(draftKey).repositoryProjectIds).toBeUndefined();
+  act(() => finishPreviousRepositorySelection([screen.projects[0]!.id]));
+  expect(screen.current.selectedProject).toEqual(screen.projects[1]);
+  expect(screen.snapshot(draftKey).repositoryProjectIds).toBeUndefined();
   expect(screen.events).toEqual(["start:/a", "start:/b"]);
   await act(async () => screen.current.selectEnvironment(EnvironmentId.make("two")));
   expect(screen.current.selectedProject).toEqual(screen.projects[2]);

@@ -78,6 +78,7 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly repositoryProjectIds?: ReadonlyArray<ProjectId>;
   readonly commandId: CommandId;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
@@ -929,9 +930,15 @@ const make = Effect.gen(function* () {
                 commandId: input.commandId,
                 threadId: candidateThreadId,
                 expectedEmpty: true,
+                ...(input.repositoryProjectIds === undefined
+                  ? {}
+                  : { repositoryProjectIds: input.repositoryProjectIds }),
               })
             : threads.dispatch({
                 type: "thread.create",
+                ...(input.repositoryProjectIds === undefined
+                  ? {}
+                  : { repositoryProjectIds: input.repositoryProjectIds }),
                 commandId: input.commandId,
                 threadId: candidateThreadId,
                 projectId: input.projectId,

@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type {
   EnvironmentId,
   ModelSelection,
+  ProjectId,
   ProviderOptionSelection,
   RuntimeMode,
   ServerProvider,
@@ -35,6 +36,7 @@ import {
 } from "../../lib/modelOptions";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
 import { useLinkedEnvironments } from "../../state/peerLinks";
@@ -156,6 +158,10 @@ type NewTaskFlowContextValue = {
     readonly environmentLabel: string;
   }>;
   readonly selectedProject: EnvironmentProject | null;
+  readonly repositoryProjectIds: ReadonlyArray<ProjectId>;
+  readonly setRepositoryProjectIds: (value: ReadonlyArray<ProjectId>) => void;
+  readonly repositorySelectionPending: boolean;
+  readonly setRepositorySelectionPending: (value: boolean) => void;
   /** The machines the selected project's environment links to, whose threads it can read. */
   readonly linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
   readonly isScratchDraft: boolean;
@@ -208,6 +214,7 @@ type NewTaskFlowContextValue = {
 };
 
 const NewTaskFlowContext = React.createContext<NewTaskFlowContextValue | null>(null);
+const repositorySelectionPendingAtom = Atom.make(new Set<string>()).pipe(Atom.keepAlive);
 
 export function NewTaskFlowProvider(
   props: React.PropsWithChildren<{
@@ -326,6 +333,10 @@ export function NewTaskFlowProvider(
   const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const selectedProjectDraftKey = selectedProject ? activeDraftKey : null;
+  const repositorySelectionPending = useAtomValue(
+    repositorySelectionPendingAtom,
+    (pending) => selectedProjectDraftKey !== null && pending.has(selectedProjectDraftKey),
+  );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- creates the persistent draft in the new-task flow store once a project is selected, before the composer mounts
   useEffect(() => {
     // A route that names a draft binds that draft, or returns to the picker.
@@ -357,6 +368,7 @@ export function NewTaskFlowProvider(
   const selectedProjectDraft = useComposerDraft(selectedProjectDraftKey);
   const prompt = selectedProjectDraft.text;
   const attachments = selectedProjectDraft.attachments;
+  const repositoryProjectIds = selectedProjectDraft.repositoryProjectIds ?? [];
   const projectGitStatus = useEnvironmentQuery(
     props.active !== false && selectedProject !== null && selectedProject.workspaceRoot !== ""
       ? vcsEnvironment.status({
@@ -691,7 +703,11 @@ export function NewTaskFlowProvider(
     metadata: TurnCommandMetadata,
     options?: { readonly currentCheckoutBranch?: string | null },
   ): QueuedThreadMessage | null => {
-    if (!selectedProject || !selectedProjectDraftKey) {
+    if (
+      !selectedProject ||
+      !selectedProjectDraftKey ||
+      appAtomRegistry.get(repositorySelectionPendingAtom).has(selectedProjectDraftKey)
+    ) {
       return null;
     }
     const draft = getComposerDraftSnapshot(selectedProjectDraftKey);
@@ -734,6 +750,9 @@ export function NewTaskFlowProvider(
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       creation: {
         projectId: selectedProject.id,
+        ...(draft.repositoryProjectIds?.length
+          ? { repositoryProjectIds: draft.repositoryProjectIds }
+          : {}),
         projectTitle: selectedProject.title,
         projectCwd: selectedProject.workspaceRoot,
         workspaceMode: mode,
@@ -842,6 +861,30 @@ export function NewTaskFlowProvider(
     expandedProvider,
     environments,
     selectedProject,
+    repositoryProjectIds,
+    repositorySelectionPending,
+    setRepositorySelectionPending: (value) => {
+      if (!selectedProjectDraftKey) return;
+      const pending = new Set(appAtomRegistry.get(repositorySelectionPendingAtom));
+      if (value) pending.add(selectedProjectDraftKey);
+      else pending.delete(selectedProjectDraftKey);
+      appAtomRegistry.set(repositorySelectionPendingAtom, pending);
+    },
+    setRepositoryProjectIds: (value) => {
+      if (!selectedProjectDraftKey || !selectedProject) return;
+      const project = getComposerDraftSnapshot(selectedProjectDraftKey).project;
+      if (
+        project?.environmentId !== selectedProject.environmentId ||
+        project.projectId !== selectedProject.id
+      )
+        return;
+      if (value.length > 0)
+        updateFlow({
+          environmentId: selectedProject.environmentId,
+          projectKey: scopedProjectKey(selectedProject.environmentId, selectedProject.id),
+        });
+      updateComposerDraftSettings(selectedProjectDraftKey, { repositoryProjectIds: value });
+    },
     linkedEnvironments,
     isScratchDraft,
     modelOptions,

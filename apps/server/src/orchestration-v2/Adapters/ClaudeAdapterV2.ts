@@ -1759,6 +1759,7 @@ export function makeClaudeQueryOptions(input: {
   readonly resumeSessionAt?: string;
   readonly cwd: string | null;
   readonly attachmentsDir?: string;
+  readonly additionalDirectories?: ReadonlyArray<string>;
   readonly settings?: ClaudeSettings;
   readonly promptSuggestions?: boolean;
   readonly sdkSettings?: string | ClaudeSdkSettings;
@@ -1906,6 +1907,7 @@ export function makeClaudeQueryOptions(input: {
   const additionalDirectories = [
     ...(input.cwd === null ? [] : [input.cwd]),
     ...(input.attachmentsDir === undefined ? [] : [input.attachmentsDir]),
+    ...(input.additionalDirectories ?? []),
     ...claudeLaunchArgDirectories(input.settings?.launchArgs),
   ];
   const withDirectories =
@@ -10959,6 +10961,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             resume: shouldResume,
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
+            ...(turnInput.runtimePolicy.additionalDirectories === undefined
+              ? {}
+              : { additionalDirectories: turnInput.runtimePolicy.additionalDirectories }),
             attachmentsDir,
             settings: adapterOptions.settings,
             // Delegated threads have no one typing, so they never ask for suggestions.

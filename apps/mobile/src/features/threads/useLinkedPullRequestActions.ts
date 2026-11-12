@@ -87,7 +87,7 @@ export function useLinkedPullRequestActions(input: {
     );
   };
 
-  const promptLink = () => {
+  const promptLinkForProject = (selectedProject: EnvironmentProject | null) => {
     const { singular } = terminology;
     Dialog.prompt({
       title: `Link ${singular}`,
@@ -98,7 +98,7 @@ export function useLinkedPullRequestActions(input: {
       onConfirm: (reference) => {
         const resolved = resolveLinkPullRequestInput({
           reference,
-          project: pullRequestLinkProject(project?.repositoryIdentity),
+          project: pullRequestLinkProject(selectedProject?.repositoryIdentity),
           hasProject: () => true,
         });
         if (resolved === null) {
@@ -171,7 +171,14 @@ export function useLinkedPullRequestActions(input: {
     else if (action === "unlink") setLinked(link, false);
   };
 
-  return { canLink: canEdit, terminology, promptLink, menuActions, onMenuAction };
+  return {
+    canLink: canEdit,
+    terminology,
+    promptLink: () => promptLinkForProject(project),
+    promptLinkForProject,
+    menuActions,
+    onMenuAction,
+  };
 }
 
 export type LinkedPullRequestActions = ReturnType<typeof useLinkedPullRequestActions>;

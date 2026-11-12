@@ -1404,6 +1404,12 @@ describe("pull request panel context beside a thread", () => {
     expect(pullRequestPanelContext(stackThread, surface(10856, { projectId: "proj-b" }))).toBe(
       "page",
     );
+    expect(
+      pullRequestPanelContext(
+        { ...stackThread, repositoryAttachments: [{ projectId: "proj-b" }] },
+        surface(10856, { projectId: "proj-b" }),
+      ),
+    ).toBe("thread");
   });
 
   it("recognizes an unsynced manual link, and matches host and repository case-insensitively", () => {

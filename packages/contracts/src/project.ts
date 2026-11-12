@@ -303,6 +303,37 @@ export const ProjectListEntriesResult = Schema.Struct({
 });
 export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
 
+export const ProjectDiscoverRepositoriesInput = Schema.Struct({ projectId: ProjectId });
+export type ProjectDiscoverRepositoriesInput = typeof ProjectDiscoverRepositoriesInput.Type;
+
+export const ProjectDiscoverRepositoriesResult = Schema.Struct({
+  repositories: Schema.Array(
+    Schema.Struct({
+      name: TrimmedNonEmptyString,
+      workspaceRoot: TrimmedNonEmptyString,
+      projectId: Schema.optional(ProjectId),
+    }),
+  ),
+  truncated: Schema.Boolean,
+  unreadableDirectoryCount: NonNegativeInt,
+});
+export type ProjectDiscoverRepositoriesResult = typeof ProjectDiscoverRepositoriesResult.Type;
+
+export class ProjectDiscoverRepositoriesError extends Schema.TaggedError<ProjectDiscoverRepositoriesError>()(
+  "ProjectDiscoverRepositoriesError",
+  {
+    projectId: ProjectId,
+    failure: Schema.Literals(["project-not-found", "read-projects", "read-root"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return this.failure === "project-not-found"
+      ? "The project is no longer available."
+      : "Could not scan the project's folder for repositories.";
+  }
+}
+
 // Untracked files git ignores. Wholly ignored folders such as `node_modules`
 // are left out, so the list stays small enough to pick from.
 export const ProjectListIgnoredFilesInput = Schema.Struct({
