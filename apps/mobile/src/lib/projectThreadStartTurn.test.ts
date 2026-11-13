@@ -36,7 +36,6 @@ describe("project thread title", () => {
     const wire = serializeComposerMessageForServer(text, undefined);
     const spec = {
       projectId: ProjectId.make("project"),
-      repositoryProjectIds: [ProjectId.make("extra-project")],
       projectCwd: "/workspace",
       threadId: "image-thread",
       commandId: "image-command",
@@ -58,7 +57,6 @@ describe("project thread title", () => {
 
     expect(input.titleSeed).toBe(title);
     expect(input.bootstrap.createThread.title).toBe(input.titleSeed);
-    expect(input.bootstrap.createThread.repositoryProjectIds).toEqual(spec.repositoryProjectIds);
     expect(input.message.attachments).toEqual(uploadedAttachments);
     expect(input.message.text).toBe(wire.text);
     const relaunched = buildProjectThreadStartTurnInput({

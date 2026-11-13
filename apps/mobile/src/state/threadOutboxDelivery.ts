@@ -446,9 +446,6 @@ export async function restoreRejectedQueuedMessage(
       return "deferred";
     }
     updateComposerDraftSettings(draftKey, {
-      ...(queuedMessage.creation?.repositoryProjectIds
-        ? { repositoryProjectIds: queuedMessage.creation.repositoryProjectIds }
-        : {}),
       ...(queuedMessage.modelSelection ? { modelSelection: queuedMessage.modelSelection } : {}),
       ...(queuedMessage.runtimeMode ? { runtimeMode: queuedMessage.runtimeMode } : {}),
       ...(queuedMessage.interactionMode ? { interactionMode: queuedMessage.interactionMode } : {}),
@@ -1083,7 +1080,6 @@ export function createThreadOutboxDelivery(): {
       environmentId: queuedMessage.environmentId,
       input: buildProjectThreadStartTurnInput({
         projectId: creation.projectId,
-        repositoryProjectIds: creation.repositoryProjectIds,
         projectCwd,
         threadId: queuedMessage.threadId,
         commandId: queuedMessage.commandId,

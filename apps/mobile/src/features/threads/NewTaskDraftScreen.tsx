@@ -354,10 +354,7 @@ export function NewTaskDraftScreen(props: {
   const contextImports = useAtomValue(composerContextImportsAtom);
   const isImportingContext = flow.draftKey ? contextImports[flow.draftKey] === true : false;
   const isComposerInteractionLocked =
-    isIncomingShareTransferPending ||
-    flow.submitting ||
-    flow.repositorySelectionPending ||
-    isImportingContext;
+    isIncomingShareTransferPending || flow.submitting || isImportingContext;
   const { environments, selectedEnvironmentId, switchEnvironment, switchingToEnvironmentId } = flow;
   const cycleEnvironment = () => {
     if (isComposerInteractionLocked) return true;

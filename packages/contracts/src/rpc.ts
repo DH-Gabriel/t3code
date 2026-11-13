@@ -240,9 +240,6 @@ import {
   ProjectCreateFromThreadInput,
   ProjectCreateFromThreadResult,
   ProjectEnsureScratchResult,
-  ProjectDiscoverRepositoriesError,
-  ProjectDiscoverRepositoriesInput,
-  ProjectDiscoverRepositoriesResult,
   ProjectListEntriesError,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
@@ -416,7 +413,6 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
-  projectsDiscoverRepositories: "projects.discoverRepositories",
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
   projectsReadFile: "projects.readFile",
@@ -1344,12 +1340,6 @@ const WsProjectsSearchContentsRpc = Rpc.make(WS_METHODS.projectsSearchContents, 
   error: Schema.Union([ProjectSearchContentsError, EnvironmentAuthorizationError]),
 });
 
-const WsProjectsDiscoverRepositoriesRpc = Rpc.make(WS_METHODS.projectsDiscoverRepositories, {
-  payload: ProjectDiscoverRepositoriesInput,
-  success: ProjectDiscoverRepositoriesResult,
-  error: Schema.Union([ProjectDiscoverRepositoriesError, EnvironmentAuthorizationError]),
-});
-
 const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries, {
   payload: ProjectListEntriesInput,
   success: ProjectListEntriesResult,
@@ -2188,7 +2178,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectCloneCancelRpc,
   WsProjectCloneRetryRpc,
   WsSubscribeProjectClonesRpc,
-  WsProjectsDiscoverRepositoriesRpc,
   WsProjectsListEntriesRpc,
   WsProjectsListIgnoredFilesRpc,
   WsProjectsReadFileRpc,

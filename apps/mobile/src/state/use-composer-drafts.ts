@@ -407,7 +407,6 @@ export interface ComposerDraft {
   /** `/clear` armed this draft: its next message starts a fresh provider session. */
   readonly freshContext?: boolean;
   readonly workspaceSelection?: ComposerDraftWorkspaceSelection;
-  readonly repositoryProjectIds?: ReadonlyArray<ProjectId>;
   readonly project?: ComposerDraftProject;
 }
 
@@ -445,7 +444,6 @@ export type ComposerDraftSettingsUpdate = Pick<
   | "interactionMode"
   | "freshContext"
   | "workspaceSelection"
-  | "repositoryProjectIds"
   | "project"
 >;
 
@@ -480,7 +478,6 @@ const ComposerDraftSchema = Schema.Struct({
   interactionMode: Schema.optional(ProviderInteractionModeSchema),
   freshContext: Schema.optional(Schema.Boolean),
   workspaceSelection: Schema.optional(ComposerDraftWorkspaceSelectionSchema),
-  repositoryProjectIds: Schema.optional(Schema.Array(ProjectIdSchema)),
   project: Schema.optional(ComposerDraftProjectSchema),
 });
 
@@ -660,8 +657,7 @@ function isEmptyDraft(draft: ComposerDraft): boolean {
     draft.runtimeMode === undefined &&
     draft.interactionMode === undefined &&
     draft.freshContext !== true &&
-    draft.workspaceSelection === undefined &&
-    (draft.repositoryProjectIds?.length ?? 0) === 0
+    draft.workspaceSelection === undefined
   );
 }
 
@@ -727,8 +723,7 @@ export function decodePersistedComposerState(value: unknown): {
               draft.attachments.length === 0 &&
               draft.runtimeMode === undefined &&
               draft.interactionMode === undefined &&
-              draft.workspaceSelection === undefined &&
-              (draft.repositoryProjectIds?.length ?? 0) === 0
+              draft.workspaceSelection === undefined
               ? { ...draft, modelSelection: undefined }
               : draft,
             now,
@@ -1238,9 +1233,6 @@ export async function removeDeliveredCloudQueuedMessage(
         (editor.runtimeMode !== undefined && editor.runtimeMode !== message.runtimeMode) ||
         (editor.interactionMode !== undefined &&
           editor.interactionMode !== message.interactionMode) ||
-        (editor.repositoryProjectIds !== undefined &&
-          JSON.stringify(editor.repositoryProjectIds) !==
-            JSON.stringify(message.creation?.repositoryProjectIds)) ||
         (editor.workspaceSelection !== undefined &&
           (editor.workspaceSelection.mode !== message.creation?.workspaceMode ||
             editor.workspaceSelection.branch !== message.creation?.branch ||
@@ -1656,7 +1648,6 @@ export function clearComposerDraftContentState(
     context: _context,
     modelSelection,
     workspaceSelection,
-    repositoryProjectIds,
     project: _project,
     ...retained
   } = existing;
@@ -1666,9 +1657,6 @@ export function clearComposerDraftContentState(
     ...(options?.clearWorkspaceSelection || workspaceSelection === undefined
       ? {}
       : { workspaceSelection }),
-    ...(options?.clearWorkspaceSelection || repositoryProjectIds === undefined
-      ? {}
-      : { repositoryProjectIds }),
     text: "",
     attachments: [],
   };
@@ -1826,8 +1814,7 @@ export function sameComposerDraftState(a: ComposerDraft, b: ComposerDraft): bool
     a.runtimeMode === b.runtimeMode &&
     a.interactionMode === b.interactionMode &&
     a.freshContext === b.freshContext &&
-    a.workspaceSelection === b.workspaceSelection &&
-    a.repositoryProjectIds === b.repositoryProjectIds
+    a.workspaceSelection === b.workspaceSelection
   );
 }
 
@@ -1857,8 +1844,7 @@ export function undoComposerDraftMergeState(
       | "runtimeMode"
       | "interactionMode"
       | "freshContext"
-      | "workspaceSelection"
-      | "repositoryProjectIds",
+      | "workspaceSelection",
   >(
     key: K,
   ): ComposerDraft[K] => (existing[key] === merged[key] ? snapshot[key] : existing[key]);
@@ -1880,7 +1866,6 @@ export function undoComposerDraftMergeState(
     interactionMode: undoSetting("interactionMode"),
     freshContext: undoSetting("freshContext"),
     workspaceSelection: undoSetting("workspaceSelection"),
-    repositoryProjectIds: undoSetting("repositoryProjectIds"),
   };
   return withComposerDraft(current, draftKey, draft);
 }
@@ -1991,11 +1976,7 @@ export function retargetNewTaskDraft(
     ) {
       return current;
     }
-    const {
-      workspaceSelection: _workspaceSelection,
-      repositoryProjectIds: _repositoryProjectIds,
-      ...retained
-    } = normalizeDraft(existing);
+    const { workspaceSelection: _workspaceSelection, ...retained } = normalizeDraft(existing);
     // Keep bytes across environment moves but drop server-specific upload stamps.
     const attachments = retained.attachments.map((attachment) =>
       attachment.uploadEnvironmentId !== undefined &&

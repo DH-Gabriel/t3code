@@ -46,21 +46,6 @@ Settings that are environment-wide stay read-only while a project is selected. W
 targets disagree, a control shows **Mixed** until you choose one value. Appearance, keyboard,
 and other phone-only settings ignore the filter.
 
-## Work across projects in one thread
-
-Use **Projects** in a new or existing thread to attach other projects from the same environment.
-On mobile, open the thread or new-task settings and expand **Projects**. The picker looks for Git
-repositories inside the primary project's folder. Select a discovered repository to register and
-attach it in one step; scanning alone changes nothing. If the scan reaches its limit, add a deeper
-folder as a project to look there. The primary project remains
-the thread's home. Codex and Claude can work in the attached checkouts; other providers currently
-require you to detach them before starting a turn.
-
-Choose a repository in **Changes** to view its branch changes, local edits, commits, or captured
-turn history. Comparisons stay separate for each checkout. Linked PRs stay attached to the thread
-and are grouped by repository. Removing a project preserves its captured history and PR links.
-Change attachments between turns. Restoring files across several repositories is currently unavailable.
-
 ## Pin and archive projects
 
 Pinned projects come first in the project pickers: the project picker on a new thread, the

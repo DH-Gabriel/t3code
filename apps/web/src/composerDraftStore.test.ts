@@ -1159,7 +1159,6 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch?: string | null;
       worktreePath?: string | null;
     };
-    store.setDraftThreadContext(draftId, { repositoryProjectIds: [ProjectId.make("backend")] });
     store.setProjectDraftThreadId(projectRef, draftId, runtimeUndefinedOptions);
 
     expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
@@ -1168,7 +1167,6 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: "main",
       worktreePath: "/tmp/main-worktree",
       envMode: "worktree",
-      repositoryProjectIds: ["backend"],
     });
   });
 

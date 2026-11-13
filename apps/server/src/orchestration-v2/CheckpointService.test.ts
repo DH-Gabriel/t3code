@@ -63,38 +63,6 @@ it.effect(
         );
         yield* Effect.gen(function* () {
           const checkpoints = yield* CheckpointService.CheckpointServiceV2;
-          const scopeInput = {
-            threadId: scope.threadId,
-            runId: scope.runId!,
-            rootNodeId: scope.nodeId,
-            providerThreadId: scope.providerThreadId!,
-            cwd: scope.cwd,
-            createdAt: scope.createdAt,
-          };
-          const attached = yield* checkpoints.prepareRootRunScope({
-            ...scopeInput,
-            repositoryAttachmentId: "attachment:second",
-          });
-          const nextRun = yield* checkpoints.prepareRootRunScope({
-            ...scopeInput,
-            repositoryAttachmentId: "attachment:second",
-            runId: RunId.make("run:capture-failure:2"),
-          });
-          const otherCheckout = yield* checkpoints.prepareRootRunScope({
-            ...scopeInput,
-            repositoryAttachmentId: "attachment:second",
-            cwd: "/another-checkout",
-          });
-          assert.equal(attached.repositoryAttachmentId, "attachment:second");
-          assert.notEqual(attached.id, nextRun.id);
-          assert.notEqual(attached.id, otherCheckout.id);
-          assert.equal(
-            (yield* checkpoints.prepareRootRunScope(scopeInput)).id,
-            (yield* checkpoints.prepareRootRunScope({
-              ...scopeInput,
-              runId: nextRun.runId!,
-            })).id,
-          );
           const baseline = yield* Effect.result(
             checkpoints.captureBaseline({ scope, ordinalWithinScope: 0 }),
           );

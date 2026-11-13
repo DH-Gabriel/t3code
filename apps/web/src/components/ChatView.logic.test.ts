@@ -6,7 +6,6 @@ import {
   snapshotComposerSend,
   withMessageContext,
   deriveAvailableRevertTurnCounts,
-  resolveThreadDiffAvailable,
 } from "./ChatView.logic";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
 import { ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
@@ -668,28 +667,6 @@ describe("resolveComposerProviderSelection", () => {
 
     expect(selection.selectedProviderEntry).toBeUndefined();
   });
-});
-
-describe("thread diff availability", () => {
-  it.each([
-    [true, true, false, false, true],
-    [true, false, true, false, true],
-    [true, false, false, true, true],
-    [true, false, false, false, false],
-    [false, true, true, true, false],
-  ])(
-    "server=%s git=%s attached=%s checkpoint=%s allows diff=%s",
-    (isServerThread, isGitRepo, hasAttachedRepository, hasCheckpointDiff, expected) => {
-      expect(
-        resolveThreadDiffAvailable({
-          isServerThread,
-          isGitRepo,
-          hasAttachedRepository,
-          hasCheckpointDiff,
-        }),
-      ).toBe(expected);
-    },
-  );
 });
 
 describe("checkout Git memory", () => {

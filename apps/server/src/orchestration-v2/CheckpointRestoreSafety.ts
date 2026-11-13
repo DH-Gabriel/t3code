@@ -9,9 +9,6 @@ import type * as ProjectStore from "./ProjectStore.ts";
 export const SHARED_WORKSPACE_RESTORE_MESSAGE =
   "File restore requires an isolated worktree. This workspace may contain changes from another thread or a side chat. Rewind the conversation without restoring files instead, or delete side chats you no longer need.";
 
-export const MULTI_REPOSITORY_RESTORE_MESSAGE =
-  "File restore across attached projects is not supported. Rewind the conversation without restoring files, then restore each checkout separately.";
-
 // Check isolation at admission and rollback; checkpoints restore whole checkouts, which may become shared.
 export const isCheckpointRestoreIsolated = Effect.fn("orchestrationV2.isCheckpointRestoreIsolated")(
   function* (

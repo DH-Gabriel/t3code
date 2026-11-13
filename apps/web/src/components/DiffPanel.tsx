@@ -7,8 +7,6 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import type { ReviewBranchCommitsResult, ScopedThreadRef, RunId } from "@t3tools/contracts";
-import { threadRepositoryCheckouts } from "@t3tools/client-runtime/thread-repositories";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -58,7 +56,6 @@ import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollaps
 import { LIVE_REFRESH_MIN_INTERVAL_MS, useLiveRefresh } from "../hooks/useLiveRefresh";
 import {
   useProject,
-  useProjects,
   useThreadCheckpointSummaries,
   useQuietThreadShell,
   useQuietThreadVisibleTurnItems,
@@ -259,47 +256,10 @@ export default function DiffPanel({
         }
       : null,
   );
-  const selectedRepositoryId = useDiffPanelStore((state) =>
-    routeThreadRef
-      ? (state.repositoryByThreadKey[scopedThreadKey(routeThreadRef)] ?? "primary")
-      : "primary",
-  );
-  const projects = useProjects();
-  const repositories =
-    activeThread && activeProject
-      ? threadRepositoryCheckouts(
-          activeThread,
-          activeProject,
-          projects.filter((project) => project.environmentId === activeThread.environmentId),
-        )
-      : [];
-  const historicalRepositories = (activeThread?.repositoryAttachments ?? [])
-    .filter((attachment) => attachment.detachedAt !== null)
-    .map((attachment) => ({
-      ...attachment,
-      title:
-        attachment.repositoryIdentity?.displayName ??
-        attachment.checkoutPath.split(/[\\/]/u).filter(Boolean).at(-1) ??
-        attachment.checkoutPath,
-    }));
-  const selectedRepository =
-    [...repositories, ...historicalRepositories].find(
-      (repository) => repository.id === selectedRepositoryId,
-    ) ?? repositories[0];
-  const repositoryId = selectedRepository?.id ?? "primary";
-  const historical = historicalRepositories.some((repository) => repository.id === repositoryId);
-  const activeCwd = historical ? undefined : selectedRepository?.checkoutPath;
-  const activeRepositoryIdentity = selectedRepository?.repositoryIdentity;
-  const activeRepositoryRoot =
-    repositoryId === "primary" && activeThread?.worktreePath
-      ? undefined
-      : activeRepositoryIdentity?.rootPath;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reconciles a persisted selection when a checkout is detached on another client
-  useEffect(() => {
-    if (routeThreadRef && repositories.length > 0 && selectedRepositoryId !== repositoryId) {
-      useDiffPanelStore.getState().selectRepository(routeThreadRef, repositoryId);
-    }
-  }, [routeThreadRef, selectedRepositoryId, repositoryId, repositories.length]);
+  const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
+  const activeRepositoryRoot = activeThread?.worktreePath
+    ? undefined
+    : activeProject?.repositoryIdentity?.rootPath;
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
   );
@@ -317,22 +277,9 @@ export default function DiffPanel({
         })
       : null,
   );
-  const storedSelection = useDiffPanelStore((state) =>
-    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef, repositoryId),
+  const diffSelection = useDiffPanelStore((state) =>
+    selectThreadDiffPanelSelection(state.byThreadKey, routeThreadRef),
   );
-  const turnDiffSummaries = useThreadCheckpointSummaries(routeThreadRef);
-  const orderedTurnDiffSummaries = turnDiffSummaries
-    .filter((summary) => (summary.repositoryAttachmentId ?? "primary") === repositoryId)
-    .toSorted(
-      (left, right) =>
-        right.checkpointTurnCount - left.checkpointTurnCount ||
-        right.completedAt.localeCompare(left.completedAt),
-    );
-  const historicalTurn = historical ? orderedTurnDiffSummaries[0] : undefined;
-  const diffSelection =
-    historicalTurn && storedSelection.kind !== "turn"
-      ? { kind: "turn" as const, turnId: historicalTurn.runId, filePath: null, revealRequestId: 0 }
-      : storedSelection;
   const rememberedBaseRef = useDiffPanelStore((state) =>
     selectThreadBranchBaseRef(state, routeThreadRef),
   );
@@ -352,6 +299,13 @@ export default function DiffPanel({
   );
   const toolCallItem = toolCallDetail.data?.item;
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const turnDiffSummaries = useThreadCheckpointSummaries(routeThreadRef);
+  const orderedTurnDiffSummaries = turnDiffSummaries.toSorted((left, right) => {
+    if (left.checkpointTurnCount !== right.checkpointTurnCount) {
+      return right.checkpointTurnCount - left.checkpointTurnCount;
+    }
+    return right.completedAt.localeCompare(left.completedAt);
+  });
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rewrites the persisted diff store selection to the latest turn when the selected turn disappears
   useEffect(() => {
@@ -390,7 +344,7 @@ export default function DiffPanel({
         ? `commit:${selectedCommitSha}`
         : selectedGitScope;
   const collapseScopeKey = routeThreadRef
-    ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${repositoryId}:${reviewSectionId}`
+    ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
   const selectedCheckpointRange =
@@ -402,7 +356,6 @@ export default function DiffPanel({
       : null;
   const activeCheckpointDiff = useCheckpointDiff(
     {
-      repositoryAttachmentId: repositoryId,
       environmentId: activeThread?.environmentId ?? null,
       threadId: activeThreadId,
       fromTurnCount: selectedCheckpointRange?.fromTurnCount ?? null,
@@ -498,7 +451,9 @@ export default function DiffPanel({
       : selectedGitScopeLabel;
   const headerCommitSha = selectedRunId === null ? selectedCommitSha : null;
   const selectedCommitUrl =
-    headerCommitSha !== null ? projectCommitUrl(activeRepositoryIdentity, headerCommitSha) : null;
+    headerCommitSha !== null
+      ? projectCommitUrl(activeProject?.repositoryIdentity, headerCommitSha)
+      : null;
   const openLink = useOpenLink(routeThreadRef);
   // A SHA link goes to the code host; it must not route back into this pane's commit selection.
   const openCommitUrl = (event: MouseEvent<HTMLElement>, url: string) => {
@@ -768,13 +723,11 @@ export default function DiffPanel({
   }, [collapseScopeKey, selectedFilePath, selectedFileRevealRequestId, revealDiffFile]);
 
   const openDiffFile = (filePath: string) => {
-    if (historical) return;
     openDiffFilePrimaryAction({
       threadRef: routeThreadRef,
       filePath,
       activeCwd,
       repositoryRoot: activeRepositoryRoot,
-      useAbsolutePath: repositoryId !== "primary",
       openInEditor: (targetPath) => {
         void (async () => {
           const result = await openInPreferredEditor(targetPath);
@@ -864,35 +817,6 @@ export default function DiffPanel({
   const headerRow = (
     <>
       <div className="@container/diff-refs flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
-        {repositories.length + historicalRepositories.length > 1 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button size="xs" variant="secondary" />}
-              aria-label="Diff repository"
-            >
-              <span className="max-w-40 truncate">{selectedRepository?.title}</span>
-              <ChevronDownIcon className="size-3.5 shrink-0" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuRadioGroup
-                value={repositoryId}
-                onValueChange={(id) => {
-                  if (routeThreadRef)
-                    useDiffPanelStore.getState().selectRepository(routeThreadRef, id);
-                }}
-              >
-                {[...repositories, ...historicalRepositories].map((repository) => (
-                  <DropdownMenuRadioItem key={repository.id} value={repository.id} closeOnClick>
-                    {repository.title}
-                    {historicalRepositories.some((entry) => entry.id === repository.id)
-                      ? " · Removed"
-                      : ""}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}
@@ -929,10 +853,10 @@ export default function DiffPanel({
           ) : null}
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
-              <DropdownMenuRadioItem value="branch" disabled={historical} closeOnClick>
+              <DropdownMenuRadioItem value="branch" closeOnClick>
                 <span>Changes</span>
               </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="unstaged" disabled={historical} closeOnClick>
+              <DropdownMenuRadioItem value="unstaged" closeOnClick>
                 <span>Uncommitted</span>
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="latest" closeOnClick>
@@ -953,11 +877,6 @@ export default function DiffPanel({
                       >
                         <span className="flex items-center gap-2">
                           <span>Turn {turnCount}</span>
-                          {summary.status !== "ready" ? (
-                            <span className="text-xs text-destructive">
-                              {summary.status === "error" ? "Capture failed" : "Unavailable"}
-                            </span>
-                          ) : null}
                           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                             {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
                           </span>
@@ -976,14 +895,17 @@ export default function DiffPanel({
                 branchCommitsQuery.refresh();
               }}
             >
-              <DropdownMenuSubTrigger disabled={historical}>Commits</DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger>Commits</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="max-h-80 max-w-96">
                 <DropdownMenuRadioGroup
                   value={selectedCommitValue}
                   onValueChange={selectScopeValue}
                 >
                   {branchCommits?.commits.map((commit) => {
-                    const commitUrl = projectCommitUrl(activeRepositoryIdentity, commit.sha);
+                    const commitUrl = projectCommitUrl(
+                      activeProject?.repositoryIdentity,
+                      commit.sha,
+                    );
                     return (
                       <div
                         key={commit.sha}
@@ -1360,10 +1282,6 @@ export default function DiffPanel({
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.
         </div>
-      ) : historical && orderedTurnDiffSummaries.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          No captured history for this removed repository.
-        </div>
       ) : !isGitRepo && !toolCallSelection ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Turn diffs are unavailable because this project is not a git repository.
@@ -1508,23 +1426,15 @@ export default function DiffPanel({
                   <AnnotatableCodeView
                     key={collapseScopeKey ?? reviewSectionId}
                     environmentId={activeThread?.environmentId}
-                    projectId={selectedRepository?.projectId}
+                    projectId={activeThread?.projectId}
                     viewerRef={codeViewReveal.attach}
                     codeViewKey={codeViewMountKey}
                     className="h-full min-h-0 overflow-auto"
                     files={codeViewFiles}
                     pendingFiles={pendingFiles}
                     renderCodeViewFooter={renderLoadingBoundary}
-                    sectionId={
-                      repositoryId === "primary"
-                        ? reviewSectionId
-                        : `repository:${repositoryId}:${reviewSectionId}`
-                    }
-                    sectionTitle={
-                      repositoryId === "primary"
-                        ? reviewSectionTitle
-                        : `${reviewSectionTitle} · ${selectedRepository?.checkoutPath}`
-                    }
+                    sectionId={reviewSectionId}
+                    sectionTitle={reviewSectionTitle}
                     composerDraftTarget={composerDraftTarget}
                     renderHeaderFilenameSuffix={(fileDiff) => {
                       const path = resolveFileDiffPath(fileDiff);

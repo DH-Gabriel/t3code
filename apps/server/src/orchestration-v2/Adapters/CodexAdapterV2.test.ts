@@ -198,7 +198,6 @@ describe("CodexAdapterV2 runtime policy", () => {
             runtimeMode,
             interactionMode: "default",
             cwd: null,
-            additionalDirectories: ["/api", "/api"],
           },
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
@@ -220,17 +219,9 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.equal(auto.approvalPolicy, "on-request");
       assert.equal(auto.approvalsReviewer, "auto_review");
       assert.equal(auto.sandboxPolicy?.type, "workspaceWrite");
-      assert.deepEqual(
-        auto.sandboxPolicy?.type === "workspaceWrite" ? auto.sandboxPolicy.writableRoots : [],
-        ["/api"],
-      );
       assert.equal(fullAccess.approvalPolicy, "never");
       assert.equal(fullAccess.approvalsReviewer, "user");
       assert.equal(fullAccess.sandboxPolicy?.type, "dangerFullAccess");
-      assert.deepEqual(fullAccess.additionalContext?.["attached_project_checkouts"], {
-        kind: "untrusted",
-        value: "/api\n/api",
-      });
     }),
   );
 

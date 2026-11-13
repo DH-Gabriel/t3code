@@ -169,7 +169,6 @@ import {
   threadStreamEventItem,
 } from "./orchestration-v2/WireProjection.ts";
 import { dedupeSnapshotBodies } from "@t3tools/shared/orchestrationV2DedupedBodies";
-import * as ProjectRepositoryDiscovery from "./project/ProjectRepositoryDiscovery.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
@@ -1519,8 +1518,6 @@ export const layerWsRpc = (
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
-      const projectRepositoryDiscovery =
-        yield* ProjectRepositoryDiscovery.ProjectRepositoryDiscovery;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
@@ -2249,9 +2246,6 @@ export const layerWsRpc = (
               startup
                 .enqueueCommand(
                   ThreadMessageIntake.launchThread({
-                    ...(input.repositoryProjectIds === undefined
-                      ? {}
-                      : { repositoryProjectIds: input.repositoryProjectIds }),
                     commandId: input.commandId,
                     ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
                     ...(input.reuseExistingThread === undefined
@@ -2983,8 +2977,6 @@ export const layerWsRpc = (
                 }),
             ),
           ),
-        [WS_METHODS.projectsDiscoverRepositories]: (input) =>
-          projectRepositoryDiscovery.discover(input),
         [WS_METHODS.projectsListEntries]: (input) =>
           workspaceEntries.list(input).pipe(
             Effect.mapError(

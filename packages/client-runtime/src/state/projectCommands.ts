@@ -117,10 +117,6 @@ export function createProjectEnvironmentAtoms<R, E>(
           (result, isCurrent) => fileMetadata.rememberEntries(input.cwd, result.entries, isCurrent),
         ),
     }),
-    discoverRepositories: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:projects:discover-repositories",
-      tag: WS_METHODS.projectsDiscoverRepositories,
-    }),
     listEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:list-entries",
       tag: WS_METHODS.projectsListEntries,
