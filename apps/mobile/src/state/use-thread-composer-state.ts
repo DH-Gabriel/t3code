@@ -1,3 +1,5 @@
+import { sendCloudComposer } from "@t3tools/client-runtime/state/codex-cloud";
+import { codexCloud } from "./codex-cloud";
 import { useComposerAttachmentActions } from "./use-composer-attachment-actions";
 import * as Dialog from "../components/ui/Dialog";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
@@ -72,6 +74,7 @@ import {
   clearComposerDraft,
   clearComposerDraftContent,
   composerContextImportsAtom,
+  composerDraftsAtom,
   getComposerDraftSnapshot,
   isFreshSessionPending,
   mergeComposerDraftContent,
@@ -513,6 +516,33 @@ export function useThreadComposerState(input: {
     if (!selectedThreadShell) {
       return null;
     }
+    const cloudThreadKey = scopedThreadKey(
+      selectedThreadShell.environmentId,
+      selectedThreadShell.id,
+    );
+    const cloudDraftAtSend = appAtomRegistry.get(composerDraftsAtom)[cloudThreadKey];
+    const cloudDraft = getComposerDraftSnapshot(cloudThreadKey);
+    if (
+      queuedRunEdit === null &&
+      !appAtomRegistry.get(composerContextImportsAtom)[cloudThreadKey] &&
+      (await sendCloudComposer(
+        appAtomRegistry,
+        codexCloud,
+        {
+          environmentId: selectedThreadShell.environmentId,
+          projectId: selectedThreadShell.projectId,
+          prompt: cloudDraft.text,
+          hasNonTextContent:
+            cloudDraft.attachments.length > 0 || (cloudDraft.context?.records.length ?? 0) > 0,
+        },
+        () => {
+          if (appAtomRegistry.get(composerDraftsAtom)[cloudThreadKey] === cloudDraftAtSend)
+            setComposerDraftText(cloudThreadKey, "");
+        },
+        () => CommandId.make(uuidv4()),
+      ))
+    )
+      return null;
     // Before thread creation succeeds, follow-ups could become orphaned and be dropped by the drain.
     if (selectedThreadCreation !== null) {
       return null;

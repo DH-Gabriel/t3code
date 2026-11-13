@@ -1,3 +1,9 @@
+import { CommandId } from "@t3tools/contracts";
+import { uuidv4 } from "../../lib/uuid";
+import { sendCloudComposer } from "@t3tools/client-runtime/state/codex-cloud";
+import { codexCloud } from "../../state/codex-cloud";
+import { CloudWorkPicker } from "../../components/CloudWorkPicker";
+import { cloudComposerAtom, cloudComposerKey } from "@t3tools/client-runtime/state/codex-cloud";
 import { useSidebarWorkspaceTabs } from "../layout/workspace/useSystemWorkspaceTabBar";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
@@ -412,6 +418,9 @@ function ComposerSurface(props: {
 export const THREAD_COMPOSER_BOTTOM_GUTTER = 6;
 
 export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps) {
+  const cloudSelection = useAtomValue(
+    cloudComposerAtom(cloudComposerKey(props.environmentId, props.selectedThread.projectId)),
+  );
   const project = useProject(scopeProjectRef(props.environmentId, props.selectedThread.projectId));
   const { themeVariables: materialTheme } = useAppearancePreferences();
   const composerPanel = materialTheme["--color-composer-panel"];
@@ -582,6 +591,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   });
   const isSubmissionLocked =
     props.interactionLocked === true || queuedEdit?.saving === true || voiceInput.blocksSubmission;
+  const cloudMode = cloudSelection.enabled && queuedEdit === null && !props.interactionLocked;
   const voicePresentation = resolveVoiceComposerPresentation(
     voiceInput.state,
     voiceInput.elapsedSeconds,
@@ -672,6 +682,32 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     setComposerEditing(false);
   };
   const handleSend = async (followUp?: ActiveTurnComposerAction) => {
+    if (cloudMode) {
+      if (isSubmissionLocked) return;
+      await inputRef.current?.flushPendingInput();
+      const originalDraft = appAtomRegistry.get(composerDraftsAtom)[composerDraftKey];
+      const draft = getComposerDraftSnapshot(composerDraftKey);
+      await sendCloudComposer(
+        appAtomRegistry,
+        codexCloud,
+        {
+          environmentId: props.environmentId,
+          projectId: props.selectedThread.projectId,
+          prompt: draft.text,
+          hasNonTextContent:
+            draft.attachments.length > 0 ||
+            (draft.context?.records.length ?? 0) > 0 ||
+            pendingPastedTextAttachmentCountRef.current > 0 ||
+            pendingNativeImagePasteCountRef.current > 0,
+        },
+        () => {
+          if (appAtomRegistry.get(composerDraftsAtom)[composerDraftKey] === originalDraft)
+            setComposerDraftText(composerDraftKey, "");
+        },
+        () => CommandId.make(uuidv4()),
+      );
+      return;
+    }
     if (
       isSubmissionLocked ||
       sendBlockedReason !== null ||
@@ -840,7 +876,15 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         className="relative w-full self-center"
         style={{ maxWidth: props.contentMaxWidth }}
       >
-        {props.draftControls}
+        {!cloudMode && props.draftControls}
+        {queuedEdit === null && !props.interactionLocked && (
+          <CloudWorkPicker
+            environmentId={props.environmentId}
+            projectId={props.selectedThread.projectId}
+            providers={props.serverConfig?.providers ?? []}
+            onSend={() => void handleSend()}
+          />
+        )}
         {!isSubmissionLocked &&
         composerMenu.trigger &&
         (composerMenu.items.length > 0 || composerMenu.trigger.kind === "pull-request") ? (
@@ -911,7 +955,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             >
               <ComposerAttachmentButton
                 size={usesLargeControls ? "large" : "regular"}
-                disabled={isSubmissionLocked}
+                disabled={isSubmissionLocked || cloudMode}
                 supportsFiles={props.serverConfig !== null}
                 onPickMedia={props.onPickDraftMedia}
                 onPickFiles={props.onPickDraftFiles}
@@ -1096,7 +1140,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   compactEditor.isExpanded ? { flex: 1, justifyContent: "flex-end" } : undefined
                 }
               >
-                {modelControl}
+                {!cloudMode && modelControl}
                 <ComposerDictationStartAction
                   size={usesLargeControls ? "large" : "regular"}
                   state={voiceInput.state}
@@ -1105,32 +1149,33 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   onStart={voiceInput.start}
                   onCancel={voiceInput.cancel}
                 />
-                {showStopAction ? (
-                  <ComposerActionButton
-                    size={usesLargeControls ? "large" : "regular"}
-                    accessibilityLabel="Stop agent"
-                    icon="stop.fill"
-                    variant="danger"
-                    disabled={!props.canOperateThread}
-                    onPress={props.onStopThread}
-                  />
-                ) : showResumeAction ? (
-                  <ComposerActionButton
-                    size={usesLargeControls ? "large" : "regular"}
-                    accessibilityLabel="Resume thread"
-                    icon="play"
-                    disabled={!props.canOperateThread || resumingQueue}
-                    onPress={() => void handleResumeQueue()}
-                  />
-                ) : (
-                  <SendActionButton
-                    size={usesLargeControls ? "large" : "regular"}
-                    accessibilityLabel={sendBlockedReason ?? sendLabel}
-                    presentation={sendPresentation}
-                    disabled={!canSend}
-                    onSend={handleSend}
-                  />
-                )}
+                {!cloudMode &&
+                  (showStopAction ? (
+                    <ComposerActionButton
+                      size={usesLargeControls ? "large" : "regular"}
+                      accessibilityLabel="Stop agent"
+                      icon="stop.fill"
+                      variant="danger"
+                      disabled={!props.canOperateThread}
+                      onPress={props.onStopThread}
+                    />
+                  ) : showResumeAction ? (
+                    <ComposerActionButton
+                      size={usesLargeControls ? "large" : "regular"}
+                      accessibilityLabel="Resume thread"
+                      icon="play"
+                      disabled={!props.canOperateThread || resumingQueue}
+                      onPress={() => void handleResumeQueue()}
+                    />
+                  ) : (
+                    <SendActionButton
+                      size={usesLargeControls ? "large" : "regular"}
+                      accessibilityLabel={sendBlockedReason ?? sendLabel}
+                      presentation={sendPresentation}
+                      disabled={!canSend}
+                      onSend={handleSend}
+                    />
+                  ))}
               </View>
             </ComposerDictationDraftContent>
           </View>
@@ -1173,32 +1218,33 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                     onConfirm={voiceInput.stop}
                     onCancel={voiceInput.cancel}
                   />
-                  {showStopAction ? (
-                    <ComposerActionButton
-                      size={usesLargeControls ? "large" : "regular"}
-                      accessibilityLabel="Stop agent"
-                      icon="stop.fill"
-                      variant="danger"
-                      disabled={!props.canOperateThread}
-                      onPress={props.onStopThread}
-                    />
-                  ) : showResumeAction && voicePresentation.showsSend ? (
-                    <ComposerActionButton
-                      size={usesLargeControls ? "large" : "regular"}
-                      accessibilityLabel="Resume thread"
-                      icon="play"
-                      disabled={!props.canOperateThread || resumingQueue}
-                      onPress={() => void handleResumeQueue()}
-                    />
-                  ) : voicePresentation.showsSend ? (
-                    <SendActionButton
-                      size={usesLargeControls ? "large" : "regular"}
-                      accessibilityLabel={sendBlockedReason ?? sendLabel}
-                      presentation={sendPresentation}
-                      disabled={!canSend}
-                      onSend={handleSend}
-                    />
-                  ) : null}
+                  {!cloudMode &&
+                    (showStopAction ? (
+                      <ComposerActionButton
+                        size={usesLargeControls ? "large" : "regular"}
+                        accessibilityLabel="Stop agent"
+                        icon="stop.fill"
+                        variant="danger"
+                        disabled={!props.canOperateThread}
+                        onPress={props.onStopThread}
+                      />
+                    ) : showResumeAction && voicePresentation.showsSend ? (
+                      <ComposerActionButton
+                        size={usesLargeControls ? "large" : "regular"}
+                        accessibilityLabel="Resume thread"
+                        icon="play"
+                        disabled={!props.canOperateThread || resumingQueue}
+                        onPress={() => void handleResumeQueue()}
+                      />
+                    ) : voicePresentation.showsSend ? (
+                      <SendActionButton
+                        size={usesLargeControls ? "large" : "regular"}
+                        accessibilityLabel={sendBlockedReason ?? sendLabel}
+                        presentation={sendPresentation}
+                        disabled={!canSend}
+                        onSend={handleSend}
+                      />
+                    ) : null)}
                 </View>
               </ComposerToolbarRow>
             </ComposerDictationToolbar>

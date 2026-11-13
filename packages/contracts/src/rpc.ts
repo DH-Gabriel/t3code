@@ -1,4 +1,12 @@
 import {
+  CodexCloudScope,
+  CodexCloudSubmit,
+  CodexCloudReceipt,
+  CodexCloudOptions,
+  CodexCloudSaveEnvironment,
+  CodexCloudError,
+} from "./codexCloud.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -413,6 +421,9 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  codexCloudOptions: "codexCloud.options",
+  codexCloudSubmit: "codexCloud.submit",
+  codexCloudSaveEnvironment: "codexCloud.saveEnvironment",
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
   projectsReadFile: "projects.readFile",
@@ -2059,7 +2070,26 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+const WsCodexCloudOptionsRpc = Rpc.make(WS_METHODS.codexCloudOptions, {
+  payload: CodexCloudScope,
+  success: CodexCloudOptions,
+  error: Schema.Union([CodexCloudError, EnvironmentAuthorizationError]),
+});
+const WsCodexCloudSubmitRpc = Rpc.make(WS_METHODS.codexCloudSubmit, {
+  payload: CodexCloudSubmit,
+  success: CodexCloudReceipt,
+  error: Schema.Union([CodexCloudError, EnvironmentAuthorizationError]),
+});
+const WsCodexCloudSaveEnvironmentRpc = Rpc.make(WS_METHODS.codexCloudSaveEnvironment, {
+  payload: CodexCloudSaveEnvironment,
+  success: Schema.Void,
+  error: Schema.Union([CodexCloudError, EnvironmentAuthorizationError]),
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsCodexCloudOptionsRpc,
+  WsCodexCloudSubmitRpc,
+  WsCodexCloudSaveEnvironmentRpc,
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

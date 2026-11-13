@@ -33,6 +33,28 @@ Running `codex login` does not change a managed ChatGPT connection. In
 and complete the wizard. Then select that instance from the thread's model
 picker. See [Use multiple accounts](#use-multiple-accounts).
 
+## Send work to Codex Cloud
+
+Choose **Work in → Codex Cloud** in the composer, select an existing CLI account,
+and choose a saved or recent Cloud environment, or enter its environment ID.
+Enter a branch that is published to the Cloud environment's repository, then
+send a plain-text prompt. You can save environment IDs with your own labels.
+Recent suggestions come from task history and are not a complete environment list.
+
+Cloud uses that CLI's ChatGPT sign-in on the selected connected computer.
+Connecting ChatGPT through T3 Code does not sign in the Cloud CLI; configure an
+existing CLI instance separately. Local files, attachments, conversation context,
+and worktree or model settings are not transferred.
+The CLI account must use its saved configuration without launch overrides.
+
+An accepted submission provides a task link. Open it to follow progress; acceptance
+does not mean the task has finished. Reload saved and recent work to recover links
+after reconnecting. If the outcome is unknown, inspect recent Cloud tasks before
+preparing a new submission, since the first task may already have been accepted.
+Identical requests recover the existing task link. Choose **Prepare another submission**
+to intentionally run the same request again.
+Switch back to the connected computer to continue local work.
+
 ## Use multiple accounts
 
 Add another ChatGPT account in **Settings → Providers**, then select the account

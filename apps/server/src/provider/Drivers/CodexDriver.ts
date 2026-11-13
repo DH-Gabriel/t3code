@@ -29,6 +29,7 @@ import {
   withCodexAppServerClient,
 } from "../CodexProvider.ts";
 import { resolveCodexLaunchArgs } from "../codexLaunchArgs.ts";
+import * as Option from "effect/Option";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import { applyCodexModelCatalog } from "../codexModelCatalog.ts";
@@ -381,6 +382,57 @@ export const CodexDriver: ProviderDriver<
       snapshot,
       snapshotForCwd,
       consumeResetCredit,
+      codexCloudExecution: Effect.gen(function* () {
+        if (resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv))
+          return yield* new ProviderDriverError({
+            driver: DRIVER_KIND,
+            instanceId,
+            detail:
+              "Codex Cloud cannot use CLI launch overrides. Configure this account in its Codex home.",
+          });
+        const { client } = yield* withCodexAppServerClient({
+          binaryPath: effectiveConfig.binaryPath,
+          homePath: effectiveConfig.homePath,
+          launchArgs: "",
+          cwd: homeLayout.sharedHomePath,
+          environment: processEnv,
+        });
+        const response = yield* client.request("account/read", {});
+        if (response.account?.type !== "chatgpt" || !response.account.email)
+          return yield* new ProviderDriverError({
+            driver: DRIVER_KIND,
+            instanceId,
+            detail: "Cloud requires this CLI to be signed in with ChatGPT.",
+          });
+        const limits = yield* client
+          .request("account/rateLimits/read", null)
+          .pipe(Effect.timeout("5 seconds"), Effect.option);
+        return {
+          command: effectiveConfig.binaryPath,
+          args: [],
+          env: {
+            ...processEnv,
+            CODEX_HOME: homeLayout.effectiveHomePath ?? homeLayout.sharedHomePath,
+          },
+          accountKey: `${accountKey}\0${response.account.email}`,
+          ...(Option.isSome(limits) && limits.value.accountId
+            ? { accountId: limits.value.accountId }
+            : {}),
+        };
+      }).pipe(
+        Effect.scoped,
+        Effect.timeout("20 seconds"),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Cloud CLI sign-in could not be verified.",
+              cause,
+            }),
+        ),
+      ),
       orchestrationAdapter,
       textGeneration,
     } satisfies ProviderInstance;

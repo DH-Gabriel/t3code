@@ -362,6 +362,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
             binaryPath,
             homePath: sharedHome,
             shadowHomePath: shadowHome,
+            launchArgs: '-c cli_auth_credentials_store="file"',
           },
         });
 
@@ -372,6 +373,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
           lockKey: "codex-native",
           env: { CODEX_HOME: sharedHome },
         });
+        expect((yield* instance.codexCloudExecution!.pipe(Effect.result))._tag).toBe("Failure");
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
         Effect.scoped,
