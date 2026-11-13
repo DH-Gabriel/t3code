@@ -121,16 +121,8 @@ export const make = Effect.gen(function* () {
       const completedRunIds = new Set(
         projection.runs.filter((run) => run.status === "completed").map((run) => run.id),
       );
-      const runOrdinalById = new Map(projection.runs.map((run) => [run.id, run.ordinal]));
-      const repositoryScopes = projection.checkpointScopes.filter(
-        (scope) =>
-          (scope.repositoryAttachmentId ?? "primary") ===
-          (input.repositoryAttachmentId ?? "primary"),
-      );
-      const repositoryScopeById = new Map(repositoryScopes.map((scope) => [scope.id, scope]));
       const readyCheckpoints = projection.checkpoints.filter(
         (checkpoint) =>
-          repositoryScopeById.has(checkpoint.scopeId) &&
           checkpoint.status === "ready" &&
           checkpoint.appRunOrdinal !== null &&
           checkpoint.runId !== null &&
@@ -161,7 +153,9 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const toScope = repositoryScopeById.get(toCheckpoint.scopeId);
+      const toScope = projection.checkpointScopes.find(
+        (scope) => scope.id === toCheckpoint.scopeId,
+      );
       if (toScope === undefined) {
         return yield* new CheckpointWorkspacePathMissingError({
           operation,
@@ -183,13 +177,7 @@ export const make = Effect.gen(function* () {
 
       const firstScope =
         input.fromTurnCount === 0
-          ? repositoryScopes
-              .filter((scope) => scope.kind === "root_run" && scope.cwd === toScope.cwd)
-              .sort(
-                (left, right) =>
-                  (left.runId === null ? 0 : (runOrdinalById.get(left.runId) ?? 0)) -
-                  (right.runId === null ? 0 : (runOrdinalById.get(right.runId) ?? 0)),
-              )[0]
+          ? projection.checkpointScopes.find((scope) => scope.kind === "root_run")
           : undefined;
       const fromCheckpointRef =
         input.fromTurnCount === 0
@@ -197,23 +185,12 @@ export const make = Effect.gen(function* () {
             ? undefined
             : yield* checkpointRefForScopeOrdinal({
                 scopeId: firstScope.id,
-                ordinalWithinScope:
-                  firstScope.repositoryAttachmentId === undefined ||
-                  firstScope.repositoryAttachmentId === "primary"
-                    ? 0
-                    : Math.max(
-                        0,
-                        (firstScope.runId === null
-                          ? 1
-                          : (runOrdinalById.get(firstScope.runId) ?? 1)) - 1,
-                      ),
+                ordinalWithinScope: 0,
               }).pipe(Effect.provideService(Digest.Digest, digest))
           : (
               parentCheckpoint ??
               readyCheckpoints.find(
-                (checkpoint) =>
-                  checkpoint.appRunOrdinal === input.fromTurnCount &&
-                  repositoryScopeById.get(checkpoint.scopeId)?.cwd === toScope.cwd,
+                (checkpoint) => checkpoint.appRunOrdinal === input.fromTurnCount,
               )
             )?.ref;
       if (fromCheckpointRef === undefined) {
@@ -323,9 +300,6 @@ export const make = Effect.gen(function* () {
       fromTurnCount: 0,
       toTurnCount: input.toTurnCount,
       ignoreWhitespace,
-      ...(input.repositoryAttachmentId === undefined
-        ? {}
-        : { repositoryAttachmentId: input.repositoryAttachmentId }),
     });
     if (!isTurnDiffResult(turnDiff)) {
       return yield* new CheckpointDiffResultInvalidError({

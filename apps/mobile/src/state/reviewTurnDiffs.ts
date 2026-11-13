@@ -13,23 +13,14 @@ const lastTurnDiffsFamily = Atom.family((key: string) =>
   ),
 );
 
-export function lastReviewTurnDiffsAtom(
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-  repositoryAttachmentId?: string,
-) {
-  return lastTurnDiffsFamily(
-    JSON.stringify([environmentId, threadId, repositoryAttachmentId ?? "primary"]),
-  );
+export function lastReviewTurnDiffsAtom(environmentId: EnvironmentId, threadId: ThreadId) {
+  return lastTurnDiffsFamily(JSON.stringify([environmentId, threadId]));
 }
 
 export const recordReviewTurnDiffAnswer = (
   target: {
     readonly environmentId: EnvironmentId;
-    readonly input: {
-      readonly ignoreWhitespace?: boolean;
-      readonly repositoryAttachmentId?: string;
-    };
+    readonly input: { readonly ignoreWhitespace?: boolean };
   },
   value: OrchestrationGetTurnDiffResult,
   registry: AtomRegistry.AtomRegistry,
@@ -40,11 +31,7 @@ export const recordReviewTurnDiffAnswer = (
     if (target.input.ignoreWhitespace === true || value.fromTurnCount !== value.toTurnCount - 1) {
       return;
     }
-    const atom = lastReviewTurnDiffsAtom(
-      target.environmentId,
-      value.threadId,
-      target.input.repositoryAttachmentId,
-    );
+    const atom = lastReviewTurnDiffsAtom(target.environmentId, value.threadId);
     const current = registry.get(atom);
     if (current[value.toTurnCount] === value.diff) return;
     registry.set(atom, { ...current, [value.toTurnCount]: value.diff });

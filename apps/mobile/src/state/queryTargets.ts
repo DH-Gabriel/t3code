@@ -6,7 +6,6 @@ export interface CheckpointDiffTarget {
   readonly fromTurnCount: number | null;
   readonly toTurnCount: number | null;
   readonly ignoreWhitespace: boolean;
-  readonly repositoryAttachmentId?: string;
 }
 
 export function normalizeComposerPathSearchQuery(query: string | null): string {
@@ -31,9 +30,6 @@ export function buildCheckpointDiffTargets(target: CheckpointDiffTarget) {
           threadId: target.threadId,
           toTurnCount: target.toTurnCount,
           ignoreWhitespace: target.ignoreWhitespace,
-          ...(target.repositoryAttachmentId
-            ? { repositoryAttachmentId: target.repositoryAttachmentId }
-            : {}),
         },
       },
       turn: null,
@@ -49,9 +45,6 @@ export function buildCheckpointDiffTargets(target: CheckpointDiffTarget) {
         fromTurnCount: target.fromTurnCount,
         toTurnCount: target.toTurnCount,
         ignoreWhitespace: target.ignoreWhitespace,
-        ...(target.repositoryAttachmentId
-          ? { repositoryAttachmentId: target.repositoryAttachmentId }
-          : {}),
       },
     },
   } as const;

@@ -10,7 +10,7 @@ import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 import * as Order from "effect/Order";
 
-export type ReviewSectionKind = "turn" | "working-tree" | "branch-range" | "commit";
+export type ReviewSectionKind = "turn" | "working-tree" | "branch-range";
 
 const CHANGES_SECTION_ID = "git:branch-range";
 const CHANGES_TITLE = "Changes";
@@ -23,12 +23,9 @@ export interface ReviewSectionItem {
   readonly subtitle: string | null;
   readonly diff: string | null;
   readonly isLoading: boolean;
-  readonly unavailable?: boolean;
   readonly files?: ReviewDiffPreviewSource["files"];
   readonly truncated?: boolean;
   readonly source?: ReviewDiffPreviewSource;
-  readonly commentId?: string;
-  readonly commentTitle?: string;
 }
 
 export interface ReviewRenderableHunkRow {
@@ -522,38 +519,37 @@ export function buildReviewSectionItems(input: {
   readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>;
   readonly turnDiffById: Readonly<Record<string, string | undefined>>;
   readonly loadingGitSections: boolean;
-  readonly checkoutKey?: string;
-  readonly checkoutPath?: string;
 }): ReadonlyArray<ReviewSectionItem> {
-  const turnItems = [...input.checkpoints]
-    .sort(readyCheckpointOrder)
-    .map<ReviewSectionItem>((checkpoint) => {
+  const turnItems = getReadyReviewCheckpoints(input.checkpoints).map<ReviewSectionItem>(
+    (checkpoint) => {
       const id = getReviewSectionIdForCheckpoint(checkpoint);
       return {
         id,
         kind: "turn",
-        title:
-          checkpoint.status === "ready"
-            ? checkpointTitle(checkpoint)
-            : `${checkpointTitle(checkpoint)} · ${checkpoint.status === "error" ? "Capture failed" : "Unavailable"}`,
+        title: checkpointTitle(checkpoint),
         subtitle: checkpointSubtitle(checkpoint),
-        diff: checkpoint.status === "ready" ? (input.turnDiffById[id] ?? null) : null,
-        unavailable: checkpoint.status !== "ready",
+        diff: input.turnDiffById[id] ?? null,
         isLoading: false,
       };
-    });
+    },
+  );
 
-  const gitItems = input.gitSections.map<ReviewSectionItem>((section) => ({
-    id: section.kind === "commit" ? `commit:${section.headRef}` : `git:${section.kind}`,
-    kind: section.kind,
-    title: section.title,
-    subtitle: gitSubtitle(section),
-    diff: section.diff,
-    source: section,
-    ...(section.files ? { files: section.files } : {}),
-    truncated: section.truncated,
-    isLoading: false,
-  }));
+  const gitItems = input.gitSections
+    .filter(
+      (section): section is typeof section & { kind: ReviewSectionKind } =>
+        section.kind !== "commit",
+    )
+    .map<ReviewSectionItem>((section) => ({
+      id: `git:${section.kind}`,
+      kind: section.kind,
+      title: section.title,
+      subtitle: gitSubtitle(section),
+      diff: section.diff,
+      source: section,
+      ...(section.files ? { files: section.files } : {}),
+      truncated: section.truncated,
+      isLoading: false,
+    }));
   const hasChangesItem = gitItems.some((item) => item.id === CHANGES_SECTION_ID);
   const visibleGitItems =
     input.loadingGitSections && !hasChangesItem
@@ -570,11 +566,7 @@ export function buildReviewSectionItems(input: {
         ]
       : gitItems;
 
-  return [...turnItems, ...visibleGitItems].map((section) => ({
-    ...section,
-    ...(input.checkoutKey ? { commentId: JSON.stringify([input.checkoutKey, section.id]) } : {}),
-    ...(input.checkoutPath ? { commentTitle: `${section.title} in ${input.checkoutPath}` } : {}),
-  }));
+  return [...turnItems, ...visibleGitItems];
 }
 
 export function getDefaultReviewSectionId(

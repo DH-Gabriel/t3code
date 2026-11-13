@@ -53,19 +53,9 @@ export class RuntimePolicyAboveCeilingError extends Schema.TaggedError<RuntimePo
 
 export const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeilingError);
 
-export class RuntimePolicyRepositoryAccessError extends Schema.TaggedError<RuntimePolicyRepositoryAccessError>()(
-  "RuntimePolicyRepositoryAccessError",
-  { providerInstanceId: ProviderInstanceId },
-) {
-  override get message(): string {
-    return "This provider does not support attached projects. Choose Codex or Claude, or detach the additional projects.";
-  }
-}
-
 export const RuntimePolicyV2Error = Schema.Union([
   RuntimePolicyResolveError,
   RuntimePolicyAboveCeilingError,
-  RuntimePolicyRepositoryAccessError,
 ]);
 export type RuntimePolicyV2Error = typeof RuntimePolicyV2Error.Type;
 
@@ -89,16 +79,11 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
 ) {}
 
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
-  resolve: Effect.fn("RuntimePolicyV2.resolve")(function (
-    input: Parameters<RuntimePolicyV2Shape["resolve"]>[0],
-  ) {
+  resolve: Effect.fn("RuntimePolicyV2.resolve")(function (input) {
     return Effect.succeed({
       runtimeMode: input.thread.runtimeMode,
       interactionMode: input.thread.interactionMode,
       cwd: input.thread.worktreePath,
-      additionalDirectories: input.thread.repositoryAttachments
-        ?.filter((attachment) => attachment.detachedAt === null)
-        .map((attachment) => attachment.checkoutPath),
     });
   }),
 });
@@ -170,20 +155,6 @@ export const layerFromProjectStore: Layer.Layer<
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         yield* refuseAboveCeiling(managedPolicy, input.thread);
         const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
-        const additionalDirectories = (input.thread.repositoryAttachments ?? [])
-          .filter((attachment) => attachment.detachedAt === null)
-          .map((attachment) => attachment.checkoutPath);
-        if (
-          additionalDirectories.length > 0 &&
-          instance !== undefined &&
-          instance.driverKind !== "codex" &&
-          instance.driverKind !== "claudeAgent" &&
-          input.modelSelection.instanceId !== "devReplay"
-        ) {
-          return yield* new RuntimePolicyRepositoryAccessError({
-            providerInstanceId: input.modelSelection.instanceId,
-          });
-        }
         const supportedRuntimeModes =
           instance === undefined
             ? undefined
@@ -217,7 +188,6 @@ export const layerFromProjectStore: Layer.Layer<
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
-          ...(additionalDirectories.length === 0 ? {} : { additionalDirectories }),
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
         });
       }),

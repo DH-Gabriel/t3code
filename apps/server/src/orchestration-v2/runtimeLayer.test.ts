@@ -2493,12 +2493,6 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         createdAt: "2026-09-07T00:00:00.000Z",
       } as const;
       yield* seedProject(project);
-      const attachedProjectId = ProjectId.make("runtime-layer-attached-project");
-      yield* seedProject({
-        ...project,
-        projectId: attachedProjectId,
-        workspaceRoot: "/workspace/api",
-      });
       const create = {
         type: "thread.create" as const,
         createdBy: "user" as const,
@@ -2506,7 +2500,6 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         commandId: CommandId.make("runtime-layer-lifecycle-create"),
         threadId,
         projectId,
-        repositoryProjectIds: [attachedProjectId],
         title: "Lifecycle thread",
         modelSelection,
         runtimeMode: "full-access" as const,
@@ -2519,42 +2512,6 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const retriedCreate = yield* orchestrator.dispatch(create);
       assert.equal(retriedCreate.sequence, firstCreate.sequence);
       assert.lengthOf(retriedCreate.storedEvents, 1);
-
-      yield* orchestrator.dispatch({
-        type: "thread.metadata.update",
-        commandId: CommandId.make("runtime-layer-attach-project"),
-        threadId,
-        repositoryProjectIds: [projectId, attachedProjectId, attachedProjectId],
-      });
-      const attached = (yield* orchestrator.getThreadProjection(threadId)).thread
-        .repositoryAttachments;
-      assert.equal(attached?.length, 1);
-      assert.equal(attached?.[0]?.checkoutPath, "/workspace/api");
-      assert.equal(attached?.[0]?.detachedAt, null);
-      assert.deepEqual(
-        (yield* orchestrator.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
-          ?.repositoryAttachments,
-        attached,
-      );
-      const unknownProject = yield* orchestrator
-        .dispatch({
-          type: "thread.metadata.update",
-          commandId: CommandId.make("runtime-layer-attach-missing-project"),
-          threadId,
-          repositoryProjectIds: [ProjectId.make("missing-project")],
-        })
-        .pipe(Effect.flip);
-      assert.instanceOf(unknownProject, Orchestrator.OrchestratorDispatchError);
-      yield* orchestrator.dispatch({
-        type: "thread.metadata.update",
-        commandId: CommandId.make("runtime-layer-detach-project"),
-        threadId,
-        repositoryProjectIds: [],
-      });
-      const detached = (yield* orchestrator.getThreadProjection(threadId)).thread
-        .repositoryAttachments;
-      assert.equal(detached?.[0]?.id, attached?.[0]?.id);
-      assert.isString(detached?.[0]?.detachedAt);
 
       yield* orchestrator.dispatch({
         type: "thread.metadata.update",

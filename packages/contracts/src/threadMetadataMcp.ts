@@ -4,12 +4,10 @@ import {
   CommandId,
   IsoDateTime,
   NonNegativeInt,
-  ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { ThreadLinkedPullRequest } from "./threadPullRequest.ts";
-import { ThreadRepositoryAttachment } from "./threadRepository.ts";
 import { ThreadTitleRegeneration } from "./threadTitle.ts";
 
 export function hasOnlyPairedSurrogates(value: string): boolean {
@@ -42,25 +40,19 @@ const ThreadMetadataClientRequestId = TrimmedNonEmptyString.check(Schema.isMaxLe
   )
   .annotate({ description: "Stable idempotency key to reuse when retrying this mutation." });
 
-export const ThreadMetadataMcpAction = Schema.Literals([
-  "rename",
-  "regenerate_title",
-  "set_projects",
-]);
+export const ThreadMetadataMcpAction = Schema.Literals(["rename", "regenerate_title"]);
 export type ThreadMetadataMcpAction = typeof ThreadMetadataMcpAction.Type;
 
 export const ThreadMetadataMcpUpdateInput = Schema.Struct({
   threadId: Schema.optional(ThreadId),
   action: ThreadMetadataMcpAction,
   title: Schema.optional(ThreadMetadataTitle),
-  repositoryProjectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(32))),
   clientRequestId: Schema.optional(ThreadMetadataClientRequestId),
 }).check(
   Schema.makeFilter((input) =>
-    (input.action === "rename") === (input.title !== undefined) &&
-    (input.action === "set_projects") === (input.repositoryProjectIds !== undefined)
+    (input.action === "rename") === (input.title !== undefined)
       ? true
-      : "rename requires only title; set_projects requires only repositoryProjectIds; regenerate_title accepts neither.",
+      : "rename requires title; regenerate_title does not accept one.",
   ),
 );
 export type ThreadMetadataMcpUpdateInput = typeof ThreadMetadataMcpUpdateInput.Type;
@@ -73,7 +65,6 @@ export const ThreadMetadataMcpUpdateResult = Schema.Struct({
   title: Schema.String,
   titleRegeneration: Schema.NullOr(ThreadTitleRegeneration),
   linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
-  repositoryAttachments: Schema.optional(Schema.Array(ThreadRepositoryAttachment)),
   updatedAt: IsoDateTime,
 });
 export type ThreadMetadataMcpUpdateResult = typeof ThreadMetadataMcpUpdateResult.Type;

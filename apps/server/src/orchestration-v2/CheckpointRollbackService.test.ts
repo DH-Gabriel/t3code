@@ -61,8 +61,8 @@ const layerCheckpointRollbackService = CheckpointRollbackService.layer.pipe(
   ),
 );
 
-it.effect.each(["initial", "waiting", "attached"])(
-  "rejects an unsafe checkpoint restore from %s before opening a session or restoring files",
+it.effect.each(["initial", "waiting"])(
+  "rejects a non-ready checkpoint from %s before opening a session or restoring files",
   (state) => {
     const threadId = ThreadId.make("thread:rollback-non-ready");
     const providerThreadId = ProviderThreadId.make("provider-thread:rollback-non-ready");
@@ -77,7 +77,6 @@ it.effect.each(["initial", "waiting", "attached"])(
     const release = Deferred.makeUnsafe<void>();
     let projection = {
       thread: {
-        repositoryAttachments: state === "attached" ? [{ id: "api" }] : [],
         worktreePath: process.cwd(),
         activeProviderThreadId: providerThreadId,
         modelSelection: { instanceId: providerInstanceId, model: "test-model" },
@@ -86,7 +85,7 @@ it.effect.each(["initial", "waiting", "attached"])(
       checkpoint: {
         id: checkpointId,
         scopeId,
-        status: state === "initial" ? "stale" : "ready",
+        status: state === "waiting" ? "ready" : "stale",
         appRunOrdinal: 0,
       },
       scope: { id: scopeId, cwd: process.cwd() },
@@ -158,15 +157,10 @@ it.effect.each(["initial", "waiting", "attached"])(
           },
         ],
       ]);
-      assert.equal(
-        error.reason,
-        state === "attached" ? "multiple-repositories" : "rollback-target-invalid",
-      );
+      assert.equal(error.reason, "rollback-target-invalid");
       assert.equal(
         error.message,
-        state === "attached"
-          ? "File restore across attached projects is not supported. Rewind the conversation without restoring files, then restore each checkout separately."
-          : `Rollback target ${checkpointId} for provider thread ${providerThreadId} on thread ${threadId} is incomplete or invalid.`,
+        `Rollback target ${checkpointId} for provider thread ${providerThreadId} on thread ${threadId} is incomplete or invalid.`,
       );
       assert.equal(error.cause, undefined);
       assert.equal(resolveRuntimePolicy.mock.calls.length, 0);

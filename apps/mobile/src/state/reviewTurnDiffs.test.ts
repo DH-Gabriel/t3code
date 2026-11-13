@@ -27,14 +27,6 @@ describe("recordReviewTurnDiffAnswer", () => {
       yield* answer(registry, { fromTurnCount: 0, toTurnCount: 1, diff: "turn one" });
       yield* answer(registry, { fromTurnCount: 1, toTurnCount: 2, diff: "turn two" });
 
-      yield* recordReviewTurnDiffAnswer(
-        { environmentId, input: { repositoryAttachmentId: "extra" } },
-        { threadId, fromTurnCount: 1, toTurnCount: 2, diff: "other repository" },
-        registry,
-      );
-      expect(registry.get(lastReviewTurnDiffsAtom(environmentId, threadId, "extra"))).toEqual({
-        2: "other repository",
-      });
       // A disconnected sheet mounts no turn query; every loaded turn still has its diff.
       const cached = registry.get(lastReviewTurnDiffsAtom(environmentId, threadId));
       expect(

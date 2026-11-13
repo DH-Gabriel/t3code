@@ -725,7 +725,6 @@ describe("thread outbox recovery rollback", () => {
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
       creation: {
         projectId: ProjectId.make("project-1"),
-        repositoryProjectIds: [ProjectId.make("project-2")],
         workspaceMode: "local",
         branch: null,
         worktreePath: null,
@@ -743,7 +742,6 @@ describe("thread outbox recovery rollback", () => {
       text: message.text,
       attachments: message.attachments,
       modelSelection: message.modelSelection,
-      repositoryProjectIds: message.creation!.repositoryProjectIds,
       project: {
         environmentId: message.environmentId,
         projectId: message.creation!.projectId,

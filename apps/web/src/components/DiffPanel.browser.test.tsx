@@ -28,7 +28,6 @@ const state = vi.hoisted(() => ({
   thread: null as ReturnType<typeof makeThreadFixture> | null,
   threadRef: null as ScopedThreadRef | null,
   previews: new Map<string | null, ResultAtom<ReviewDiffPreviewResult>>(),
-  repositoryPreviews: new Map<string, ResultAtom<ReviewDiffPreviewResult>>(),
   patch: null as unknown as ResultAtom<ReviewDiffPreviewSource>,
   diffFilesCollapsed: false,
   config: null as unknown as Atom.Atom<null>,
@@ -43,8 +42,8 @@ vi.mock("~/state/server", () => ({
 }));
 vi.mock("~/state/review", () => ({
   reviewEnvironment: {
-    diffPreview: ({ input }: { input: { cwd: string; baseRef?: string } }) =>
-      state.repositoryPreviews.get(input.cwd) ?? state.previews.get(input.baseRef ?? null)!,
+    diffPreview: ({ input }: { input: { baseRef?: string } }) =>
+      state.previews.get(input.baseRef ?? null)!,
     branchCommits: () => state.commits,
     diffFilePatch: () => state.patch,
     diffFileContents: {},
@@ -59,8 +58,7 @@ vi.mock("~/state/vcs", () => ({
 }));
 vi.mock("~/state/entities", () => ({
   useQuietThreadShell: () => state.thread,
-  useProject: () => ({ title: "Frontend", workspaceRoot: "/project", repositoryIdentity: null }),
-  useProjects: () => [],
+  useProject: () => ({ workspaceRoot: "/project", repositoryIdentity: null }),
   useThreadCheckpointSummaries: () => [],
   useQuietThreadVisibleTurnItems: () => [],
 }));
@@ -123,7 +121,6 @@ function setup(failedBaseRef: string | null) {
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
-      repositoryByThreadKey: {},
       keepSelectionOnOpenThreadKey: null,
     });
     useDiffPanelSessionStore.setState({ collapsedFileKeysByScopeKey: {} });
@@ -146,7 +143,6 @@ function setup(failedBaseRef: string | null) {
     worktreePath: cwd,
   });
   state.previews.clear();
-  state.repositoryPreviews.clear();
   state.previews.set(null, Atom.make(AsyncResult.success(preview())));
   state.previews.set("main", Atom.make(AsyncResult.success(preview())));
   state.previews.set(failedBaseRef, Atom.make(AsyncResult.fail(new Error(errorMessage))));
@@ -232,55 +228,6 @@ it.each([
     });
   },
 );
-
-it("switches checkout diffs without a completed turn and remembers each repository's comparison", async () => {
-  using context = setup("origin/orphan");
-  state.thread = {
-    ...state.thread!,
-    repositoryAttachments: [
-      {
-        id: "backend",
-        projectId: ProjectId.make("backend-project"),
-        checkoutPath: "/backend",
-        repositoryIdentity: null,
-        attachedAt: "2026-11-09T00:00:00Z",
-        detachedAt: null,
-      },
-    ],
-  };
-  const backend = preview();
-  state.repositoryPreviews.set(
-    "/backend",
-    Atom.make(
-      AsyncResult.success({
-        ...backend,
-        cwd: "/backend",
-        sources: [
-          {
-            ...backend.sources[0]!,
-            files: [{ path: "backend.py", previousPath: null, additions: 1, deletions: 0 }],
-          },
-        ],
-      }),
-    ),
-  );
-  await using screen = await render(
-    <RegistryContext.Provider value={context.registry}>
-      <div style={{ height: 600, display: "flex", flexDirection: "column" }}>
-        <DiffPanel composerDraftTarget={context.threadRef} workspaceMutationId={null} visible />
-      </div>
-    </RegistryContext.Provider>,
-  );
-  await expect.element(screen.getByText(errorMessage, { exact: true })).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Diff repository" }));
-  await userEvent.click(page.getByRole("menuitemradio", { name: "backend", exact: true }));
-  await expect
-    .element(screen.getByRole("button", { name: "Expand backend.py", exact: true }))
-    .toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Diff repository" }));
-  await userEvent.click(page.getByRole("menuitemradio", { name: "Frontend", exact: true }));
-  await expect.element(screen.getByText(errorMessage, { exact: true })).toBeVisible();
-});
 
 it.each([false, true])(
   "expands an unloaded file on the first click with default collapse %s",

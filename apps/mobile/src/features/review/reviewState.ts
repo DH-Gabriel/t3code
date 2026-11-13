@@ -74,14 +74,11 @@ export interface ReviewCacheForThread {
 }
 
 function buildThreadKey(input: {
-  readonly checkoutKey?: string;
   readonly environmentId?: EnvironmentId;
   readonly threadId?: ThreadId;
 }): string | null {
   return input.environmentId && input.threadId
-    ? input.checkoutKey
-      ? JSON.stringify([scopedThreadKey(input.environmentId, input.threadId), input.checkoutKey])
-      : scopedThreadKey(input.environmentId, input.threadId)
+    ? scopedThreadKey(input.environmentId, input.threadId)
     : null;
 }
 
@@ -90,7 +87,6 @@ function buildSectionCacheKey(threadKey: string, sectionId: string): string {
 }
 
 export function useReviewCacheForThread(input: {
-  readonly checkoutKey?: string;
   readonly environmentId?: EnvironmentId;
   readonly threadId?: ThreadId;
 }): ReviewCacheForThread {

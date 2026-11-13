@@ -930,59 +930,24 @@ export const layer: Layer.Layer<
                   .responseStreamingMode,
             ),
           );
-          const repositoryScopes = yield* Effect.forEach(
-            (input.appThread.repositoryAttachments ?? []).filter(
-              (attachment) => attachment.detachedAt === null,
-            ),
-            (attachment) =>
-              checkpointService.prepareRootRunScope({
-                threadId: input.run.threadId,
-                runId: input.run.id,
-                rootNodeId: input.rootNode.id,
-                providerThreadId: input.providerThread.id,
-                cwd: attachment.checkoutPath,
-                repositoryAttachmentId: attachment.id,
-                createdAt: input.run.requestedAt,
-              }),
-          );
-          if (repositoryScopes.length > 0) {
-            yield* eventSink.writeWithEffects({
-              effects: [],
-              events: yield* Effect.forEach(repositoryScopes, (scope) =>
-                Effect.gen(function* () {
-                  return {
-                    id: yield* idAllocator.allocate.event({ threadId: input.run.threadId }),
-                    type: "checkpoint-scope.created" as const,
-                    threadId: input.run.threadId,
-                    runId: input.run.id,
-                    nodeId: input.rootNode.id,
-                    occurredAt: input.run.requestedAt,
-                    payload: scope,
-                  };
-                }),
-              ),
-            });
-          }
           // Side chats share the parent's worktree; a snapshot would capture the parent's edits.
-          if (input.appThread.lineage.sideChat !== true) {
-            for (const scope of [input.checkpointScope, ...repositoryScopes]) {
-              yield* checkpointService
-                .captureBaseline({
-                  scope,
+          yield* (
+            input.appThread.lineage.sideChat === true
+              ? Effect.void
+              : checkpointService.captureBaseline({
+                  scope: input.checkpointScope,
                   ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
                 })
-                .pipe(
-                  Effect.catchCauseIf(
-                    (cause) => !Cause.hasInterruptsOnly(cause),
-                    (_cause) =>
-                      Effect.logWarning(
-                        "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
-                        { runId: input.run.id, scopeId: scope.id },
-                      ),
-                  ),
-                );
-            }
-          }
+          ).pipe(
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              (_cause) =>
+                Effect.logWarning(
+                  "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
+                  { runId: input.run.id },
+                ),
+            ),
+          );
           if (
             input.shouldStartProviderTurn !== undefined &&
             !(yield* input.shouldStartProviderTurn())

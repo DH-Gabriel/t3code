@@ -421,9 +421,6 @@ export function useCheckpointDiff(
           input: {
             threadId: target.threadId!,
             toTurnCount: target.toTurnCount!,
-            ...(target.repositoryAttachmentId
-              ? { repositoryAttachmentId: target.repositoryAttachmentId }
-              : {}),
             ignoreWhitespace: target.ignoreWhitespace,
           },
         }
@@ -436,9 +433,6 @@ export function useCheckpointDiff(
             threadId: target.threadId!,
             fromTurnCount: target.fromTurnCount!,
             toTurnCount: target.toTurnCount!,
-            ...(target.repositoryAttachmentId
-              ? { repositoryAttachmentId: target.repositoryAttachmentId }
-              : {}),
             ignoreWhitespace: target.ignoreWhitespace,
           },
         }

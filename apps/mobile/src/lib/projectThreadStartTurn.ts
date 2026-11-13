@@ -18,7 +18,6 @@ import type { UploadedMobileAttachment } from "./attachmentUpload";
 
 export interface ProjectThreadStartTurnSpec {
   readonly projectId: ProjectId;
-  readonly repositoryProjectIds?: ReadonlyArray<ProjectId>;
   readonly projectCwd: string;
   readonly threadId: string;
   readonly commandId: string;
@@ -62,9 +61,6 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
     bootstrap: {
       createThread: {
         projectId: spec.projectId,
-        ...(spec.repositoryProjectIds?.length
-          ? { repositoryProjectIds: spec.repositoryProjectIds }
-          : {}),
         title,
         modelSelection: spec.modelSelection,
         runtimeMode: spec.runtimeMode,
