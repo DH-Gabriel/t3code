@@ -117,8 +117,7 @@ async function install(dir, key) {
     if (validate.status !== 0) {
       throw executableError(
         key,
-        validate.error?.message ||
-          validate.stderr?.trim() ||
+        [validate.error?.message, validate.stderr?.trim()].filter(Boolean).join("\n") ||
           `--version exited with ${validate.signal || validate.status}`,
       );
     }

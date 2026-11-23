@@ -365,7 +365,7 @@ fs.readFileSync = (file, ...rest) => {
           "#!/t3-test-missing-loader\n",
           '#!/bin/sh\necho "runtime loader failed" >&2\nexit 42\n',
           "#!/bin/sh\nkill -TERM $$\n",
-          '#!/bin/sh\ntrap \'echo caught > "$T3CODE_TEST_TERM"; exit 42\' TERM\necho ready > "$T3CODE_TEST_READY"\nwhile :; do :; done\n',
+          '#!/bin/sh\ntrap \'echo caught > "$T3CODE_TEST_TERM"; exit 42\' TERM\necho "runtime loader failed" >&2\necho ready > "$T3CODE_TEST_READY"\nwhile :; do :; done\n',
         ]) {
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-validation-test-" });
           const output = yield* buildNpmLauncher({
@@ -406,6 +406,7 @@ syncBuiltinESMExports();
             assert.include(failed.stderr, "runtime loader failed");
           }
           if (executable.includes("trap")) {
+            assert.include(failed.stderr, "ETIMEDOUT");
             assert.isTrue(yield* fs.exists(env.T3CODE_TEST_READY));
             assert.isFalse(yield* fs.exists(env.T3CODE_TEST_TERM));
           }
