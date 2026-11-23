@@ -476,6 +476,8 @@ describe("environment theme", () => {
               path.join(previous, "shared", "themes", "nightfall.json"),
               encodeThemeFile(NIGHTFALL_THEME),
             );
+            // macOS need not report an ancestor rename while the fallback probes are paused.
+            yield* service.current;
             assert.deepEqual(yield* Queue.take(snapshots), []);
             yield* fs.rename(previous, active);
             yield* Deferred.succeed(resumeProbes, undefined);
