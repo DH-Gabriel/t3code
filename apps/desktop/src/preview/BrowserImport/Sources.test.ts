@@ -661,7 +661,9 @@ describe("Firefox Snap profiles", () => {
           assert.deepEqual(yield* listSourceProfiles(firefox, context), [
             { directory, name: "abcd.default", cookieCount: 2 },
           ]);
-        }),
+        }).pipe(
+          Effect.provideService(HostProcess.Addresses, Effect.succeed(new Set(["127.0.0.1"]))),
+        ),
       ),
   );
 
