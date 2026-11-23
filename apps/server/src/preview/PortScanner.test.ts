@@ -1081,13 +1081,15 @@ const agentServer = () =>
     }>((resume) => {
       const env = { ...process.env, [PortScanner.AGENT_THREAD_ENV]: "thread-live" };
       // dash ignores `set -m` without a terminal; bash, like agent tool shells, honors it.
+      // Keep the command assignment out of the parent's argv: macOS ps appends its environment.
       const child = NodeChildProcess.spawn(
         "bash",
         [
           "-c",
-          `set -m; ${AGENT_COMMAND_ENV}=command-live "$0" -e "$1" & wait`,
+          'set -m; env "$2=command-live" "$0" -e "$1" & wait',
           process.execPath,
           AGENT_SERVER_SCRIPT,
+          AGENT_COMMAND_ENV,
         ],
         { detached: true, env, stdio: ["ignore", "pipe", "ignore"] },
       );
