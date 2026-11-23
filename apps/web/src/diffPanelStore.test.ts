@@ -1,11 +1,10 @@
-import { EnvironmentId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import { EnvironmentId, RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   resolveToolCallDiffTarget,
-  selectThreadDiffPanelSelection,
   useDiffPanelSessionStore,
   useDiffPanelStore,
 } from "./diffPanelStore";
@@ -15,7 +14,6 @@ describe("diffPanelStore", () => {
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
-      repositoryByThreadKey: {},
     });
     useDiffPanelSessionStore.setState({ collapsedFileKeysByScopeKey: {} });
   });
@@ -118,29 +116,22 @@ describe("diffPanelStore", () => {
     expect(defaults).toEqual(new Set(["src/app.ts", "src/index.ts"]));
   });
 
-  it("keeps each checkout's comparison and scope when switching repositories and cleans them with the thread", () => {
+  it("keeps the repository filter across turns and drops it for a requested file", () => {
     const ref = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
+    const selection = () => useDiffPanelStore.getState().byThreadKey[scopedThreadKey(ref)];
     const store = useDiffPanelStore.getState();
-    store.selectBranchBaseRef(ref, "main");
-    store.selectRepository(ref, "backend");
-    store.selectBranchBaseRef(ref, "release");
-    store.selectGitScope(ref, "unstaged");
-    store.selectRepository(ref, "primary");
-    expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref)).toEqual({
-      kind: "branch",
-      baseRef: "main",
+    store.selectTurnRepository(ref, RunId.make("run-1"), "/work/api");
+    store.selectTurn(ref, RunId.make("run-2"));
+    expect(selection()).toMatchObject({ turnId: "run-2", repository: "/work/api" });
+    store.selectTurn(ref, RunId.make("run-2"), "web/src/index.ts");
+    expect(selection()).toEqual({
+      kind: "turn",
+      turnId: "run-2",
+      filePath: "web/src/index.ts",
+      revealRequestId: 2,
     });
-    store.selectRepository(ref, "backend");
-    expect(
-      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref, "backend"),
-    ).toEqual({ kind: "unstaged" });
-    store.selectGitScope(ref, "branch");
-    expect(
-      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref, "backend"),
-    ).toEqual({ kind: "branch", baseRef: "release" });
-    store.removeThread(ref);
-    expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
-    expect(useDiffPanelStore.getState().branchBaseRefByThreadKey).toEqual({});
-    expect(useDiffPanelStore.getState().repositoryByThreadKey).toEqual({});
+    store.selectTurnRepository(ref, RunId.make("run-2"), "/work/api");
+    store.selectTurnRepository(ref, RunId.make("run-2"), null);
+    expect(selection()).not.toHaveProperty("repository");
   });
 });

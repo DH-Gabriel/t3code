@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
 export class RuntimePolicyResolveError extends Schema.TaggedError<RuntimePolicyResolveError>()(
@@ -53,19 +54,9 @@ export class RuntimePolicyAboveCeilingError extends Schema.TaggedError<RuntimePo
 
 export const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeilingError);
 
-export class RuntimePolicyRepositoryAccessError extends Schema.TaggedError<RuntimePolicyRepositoryAccessError>()(
-  "RuntimePolicyRepositoryAccessError",
-  { providerInstanceId: ProviderInstanceId },
-) {
-  override get message(): string {
-    return "This provider does not support attached projects. Choose Codex or Claude, or detach the additional projects.";
-  }
-}
-
 export const RuntimePolicyV2Error = Schema.Union([
   RuntimePolicyResolveError,
   RuntimePolicyAboveCeilingError,
-  RuntimePolicyRepositoryAccessError,
 ]);
 export type RuntimePolicyV2Error = typeof RuntimePolicyV2Error.Type;
 
@@ -88,22 +79,7 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
   "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
-export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
-  resolve: Effect.fn("RuntimePolicyV2.resolve")(function (
-    input: Parameters<RuntimePolicyV2Shape["resolve"]>[0],
-  ) {
-    return Effect.succeed({
-      runtimeMode: input.thread.runtimeMode,
-      interactionMode: input.thread.interactionMode,
-      cwd: input.thread.worktreePath,
-      additionalDirectories: input.thread.repositoryAttachments
-        ?.filter((attachment) => attachment.detachedAt === null)
-        .map((attachment) => attachment.checkoutPath),
-    });
-  }),
-});
-
-function providerRuntimeMode(
+export function providerRuntimeMode(
   runtimeMode: RuntimeMode,
   supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined,
 ): RuntimeMode {
@@ -158,10 +134,12 @@ export const layerFromProjectStore: Layer.Layer<
   | ProjectStore.ProjectStoreV2
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ServerSettings.ServerSettingsService
+  | WorkspaceFolders.WorkspaceFolders
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
+    const workspaceFolders = yield* WorkspaceFolders.WorkspaceFolders;
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     // The same ceiling the orchestrator enforces, fixed for the server's life.
     const { managedPolicy } = yield* ServerSettings.ServerSettingsService;
@@ -170,20 +148,6 @@ export const layerFromProjectStore: Layer.Layer<
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         yield* refuseAboveCeiling(managedPolicy, input.thread);
         const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
-        const additionalDirectories = (input.thread.repositoryAttachments ?? [])
-          .filter((attachment) => attachment.detachedAt === null)
-          .map((attachment) => attachment.checkoutPath);
-        if (
-          additionalDirectories.length > 0 &&
-          instance !== undefined &&
-          instance.driverKind !== "codex" &&
-          instance.driverKind !== "claudeAgent" &&
-          input.modelSelection.instanceId !== "devReplay"
-        ) {
-          return yield* new RuntimePolicyRepositoryAccessError({
-            providerInstanceId: input.modelSelection.instanceId,
-          });
-        }
         const supportedRuntimeModes =
           instance === undefined
             ? undefined
@@ -213,12 +177,25 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
+        // The turn can still run in its own cwd, as a single-folder thread does.
+        const workspace = yield* workspaceFolders
+          .forThread({
+            projectId: input.thread.projectId,
+            worktreePath: input.thread.worktreePath,
+          })
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Could not resolve the thread's tracked folders.", cause).pipe(
+                Effect.as(undefined),
+              ),
+            ),
+          );
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
-          ...(additionalDirectories.length === 0 ? {} : { additionalDirectories }),
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
+          ...(workspace === undefined || workspace.folders.length === 0 ? {} : { workspace }),
         });
       }),
     });

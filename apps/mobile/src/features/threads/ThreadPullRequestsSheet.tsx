@@ -1,9 +1,9 @@
-import { threadRepositoryCheckouts } from "@t3tools/client-runtime/thread-repositories";
-import { useProjects } from "../../state/entities";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { LegendList } from "@legendapp/list/react-native";
+import { useGT } from "gt-react-native";
+import { changeRequestTermKind } from "../../lib/changeRequestTerm";
 import { useMemo } from "react";
-import { Platform, View } from "react-native";
+import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -22,21 +22,11 @@ export function ThreadPullRequestsSheet(
   _props: StaticScreenProps<{ readonly environmentId: string; readonly threadId: string }>,
 ) {
   const navigation = useNavigation();
+  const gt = useGT();
   const insets = useSafeAreaInsets();
   const { selectedThread, selectedThreadProject, selectedEnvironmentRuntime } =
     useThreadSelection();
   const lines = useLinkedPullRequestLines(selectedThread, selectedEnvironmentRuntime);
-  const projects = useProjects();
-  const checkouts =
-    selectedThread && selectedThreadProject
-      ? threadRepositoryCheckouts(
-          selectedThread,
-          selectedThreadProject,
-          projects.filter((project) => project.environmentId === selectedThread.environmentId),
-        )
-      : [];
-  const multipleRepositories =
-    new Set(lines.map((line) => JSON.stringify([line.link.host, line.link.repository]))).size > 1;
   const openCount = useMemo(
     () =>
       lines.filter((line) => line.link.snapshot === null || line.link.snapshot.state === "open")
@@ -53,34 +43,27 @@ export function ThreadPullRequestsSheet(
     runtime: selectedEnvironmentRuntime,
   });
   const rowInputs = { lines, actions };
-  const { singular } = actions.terminology;
-  const title = `Linked ${actions.terminology.plural}`;
+  const term = changeRequestTermKind(actions.terminology);
+  const title = gt(
+    "{term, select, mr {Linked merge requests} cr {Linked change requests} other {Linked pull requests}}",
+    { term },
+  );
 
   const content = (
-    <View className="flex-1 android:bg-sheet-solid ios:bg-screen">
+    <View className="flex-1 bg-screen">
       {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- Sheet content; sheets sit outside workspace columns and keep their own header handling. */}
       <LegendList
         data={lines}
         keyExtractor={linkedPullRequestKey}
         extraData={rowInputs}
         renderItem={({ item, index }) => (
-          <View>
-            {multipleRepositories &&
-            (index === 0 ||
-              lines[index - 1]?.link.host !== item.link.host ||
-              lines[index - 1]?.link.repository !== item.link.repository) ? (
-              <Text className="px-4 pt-4 pb-1 text-sm font-t3-medium text-foreground-muted">
-                {item.link.host}/{item.link.repository}
-              </Text>
-            ) : null}
-            <LinkedPullRequestRow
-              line={item}
-              separator={index < lines.length - 1}
-              surfaceClassName={Platform.OS === "ios" ? "text-screen" : "text-sheet-solid"}
-              openPullRequest={openPullRequest}
-              actions={actions}
-            />
-          </View>
+          <LinkedPullRequestRow
+            line={item}
+            separator={index < lines.length - 1}
+            surfaceClassName="text-screen"
+            openPullRequest={openPullRequest}
+            actions={actions}
+          />
         )}
         estimatedItemSize={88}
         recycleItems
@@ -95,13 +78,16 @@ export function ThreadPullRequestsSheet(
         ListHeaderComponent={
           lines.length > 0 ? (
             <Text className="px-4 pt-2 pb-1 text-xs text-foreground-muted">
-              {openCount} open · {lines.length} linked
+              {gt("{open} open · {linked} linked", { open: openCount, linked: lines.length })}
             </Text>
           ) : null
         }
         ListEmptyComponent={
           <Text className="pt-6 text-center text-sm text-foreground-muted">
-            No linked {actions.terminology.plural}.
+            {gt(
+              "{term, select, mr {No linked merge requests.} cr {No linked change requests.} other {No linked pull requests.}}",
+              { term },
+            )}
           </Text>
         }
       />
@@ -113,33 +99,14 @@ export function ThreadPullRequestsSheet(
       <SheetHeader
         title={title}
         onClose={() => navigation.goBack()}
-        menus={
-          actions.canLink && checkouts.length > 1
-            ? [
-                {
-                  title: `Link ${singular}`,
-                  icon: "plus",
-                  items: checkouts.map((checkout) => ({
-                    id: checkout.id,
-                    title: checkout.title,
-                    onPress: () =>
-                      actions.promptLinkForProject(
-                        projects.find(
-                          (project) =>
-                            project.environmentId === selectedThread?.environmentId &&
-                            project.id === checkout.projectId,
-                        ) ?? null,
-                      ),
-                  })),
-                },
-              ]
-            : undefined
-        }
         actions={
-          actions.canLink && checkouts.length <= 1
+          actions.canLink
             ? [
                 {
-                  accessibilityLabel: `Link ${singular}`,
+                  accessibilityLabel: gt(
+                    "{term, select, mr {Link merge request} cr {Link change request} other {Link pull request}}",
+                    { term },
+                  ),
                   icon: "plus",
                   onPress: actions.promptLink,
                 },

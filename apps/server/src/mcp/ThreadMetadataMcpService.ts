@@ -65,13 +65,6 @@ function metadataCommand(input: {
   readonly update: ThreadMetadataMcpUpdateInput;
 }): Extract<OrchestrationV2Command, { readonly type: "thread.metadata.update" }> {
   switch (input.update.action) {
-    case "set_projects":
-      return {
-        type: "thread.metadata.update",
-        commandId: input.commandId,
-        threadId: input.threadId,
-        repositoryProjectIds: input.update.repositoryProjectIds!,
-      };
     case "rename":
       return {
         type: "thread.metadata.update",
@@ -95,12 +88,7 @@ function resultFromThread(input: {
   readonly sequence: number;
   readonly thread: Pick<
     OrchestrationV2AppThread,
-    | "id"
-    | "title"
-    | "titleRegeneration"
-    | "linkedPullRequest"
-    | "repositoryAttachments"
-    | "updatedAt"
+    "id" | "title" | "titleRegeneration" | "linkedPullRequest" | "updatedAt"
   >;
 }): ThreadMetadataMcpUpdateResult {
   return {
@@ -117,7 +105,6 @@ function resultFromThread(input: {
             startedAt: DateTime.formatIso(input.thread.titleRegeneration.startedAt),
           },
     linkedPullRequest: input.thread.linkedPullRequest ?? null,
-    repositoryAttachments: input.thread.repositoryAttachments ?? [],
     updatedAt: DateTime.formatIso(input.thread.updatedAt),
   };
 }
@@ -155,7 +142,12 @@ const make = Effect.gen(function* () {
         ),
       );
     if (shell === null || shell.deletedAt !== null) {
-      return yield* threadNotFound(threadManagement, threadId, `Thread ${threadId} was not found.`);
+      return yield* threadNotFound(
+        threadManagement,
+        scope,
+        threadId,
+        `Thread ${threadId} was not found.`,
+      );
     }
     const requestKey =
       input.clientRequestId === undefined ? yield* random.uuidV4() : input.clientRequestId;

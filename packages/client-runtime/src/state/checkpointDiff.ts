@@ -21,6 +21,5 @@ export interface CheckpointDiffTarget {
   readonly fromTurnCount: number | null;
   readonly toTurnCount: number | null;
   readonly ignoreWhitespace: boolean;
-  readonly repositoryAttachmentId?: string;
   readonly cacheScope?: string | null;
 }

@@ -4,44 +4,42 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { LegendList } from "@legendapp/list/react-native";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { AppBar } from "../../components/ui/AppBar";
 import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
 import type { ReviewSectionItem } from "./reviewModel";
 import { useReviewHeaderPresentation } from "./useReviewHeaderPresentation";
+import { T, useGT, Var } from "gt-react-native";
 import { type Ref, type ReactElement, useImperativeHandle, useRef, useState } from "react";
-import {
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  type NativeSyntheticEvent,
-  StyleSheet,
-  View,
-} from "react-native";
+import { Pressable, ScrollView, type NativeSyntheticEvent, StyleSheet, View } from "react-native";
+import { RefreshControl } from "../../components/ui/RefreshControl";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useReduceMotionEnabled } from "../../lib/appState";
-import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
-import { useContentTopInset } from "../../components/ui/useBarInset";
+import { useContentTopInset, useSheetContentBottomInset } from "../../components/ui/useBarInset";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { SymbolView } from "../../components/ui/AppSymbol";
+import {
+  ContentBand,
+  ContentStatus,
+  contentStatusContainerStyle,
+} from "../../components/ui/ContentBand";
+import { PaneListItem } from "../../components/ui/PaneListItem";
 import { ScreenContent } from "../../components/ui/ScreenContent";
-import { cn } from "../../lib/cn";
-import { environmentCatalog } from "../../connection/catalog";
+import { SheetPane } from "../../components/ui/SheetPane";
 import { useEnvironmentPresentation } from "../../state/presentation";
-import { useAtomCommand } from "../../state/use-atom-command";
 import { useThreadDraftForThread } from "../../state/use-thread-composer-state";
 import { EnvironmentConnectionNotice } from "../connection/EnvironmentConnectionNotice";
+import { useRetryEnvironment } from "../connection/useRetryEnvironment";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   Inspector,
   useAdaptiveWorkspaceLayout,
   useWorkspacePaneState,
 } from "../layout/AdaptiveWorkspaceLayout";
-import { useReviewRepository } from "./useReviewRepository";
-import * as Dialog from "../../components/ui/Dialog";
+import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useReviewCacheForThread } from "./reviewState";
 import {
   isNativeReviewDiffDrawEvent,
@@ -61,15 +59,16 @@ import { resolveSelectedReviewFileId } from "./reviewPaneSelection";
 import { buildReviewSectionMenu } from "./review-section-menu";
 import { reportShowcaseSceneRendered } from "../showcase/showcaseRenderSignal";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
+import type { usePullRequestFileFilter } from "../pull-requests/usePullRequestFileFilter";
 
 function ReviewHeader(
   props: Parameters<typeof useReviewHeaderPresentation>[0] & {
     readonly sectionMenu: ReturnType<typeof buildReviewSectionMenu>;
-    readonly repositoryMenu: ReadonlyArray<AppBarMenuItem>;
-    readonly comparisonMenu: ReadonlyArray<AppBarMenuItem>;
-    readonly canReadLiveDiffs: boolean;
     readonly showSectionToolbar: boolean;
     readonly showChangedFilesToggle: boolean;
+    readonly selectedRepositoryKey: string | null;
+    readonly onSelectRepository: (key: string | null) => void;
+    readonly fileFilter: ReturnType<typeof usePullRequestFileFilter>;
     readonly onSelectSection: (sectionId: string) => void;
     readonly onReturnToThread: () => void;
   },
@@ -77,20 +76,14 @@ function ReviewHeader(
   const { toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
   const presentation = useReviewHeaderPresentation(props);
-  const sectionAction = (
-    section: ReviewSectionItem | null,
-    title: string,
-    fallbackId?: string,
-  ): AppBarMenuItem => ({
+  const gt = useGT();
+  const sectionAction = (section: ReviewSectionItem | null, title: string): AppBarMenuItem => ({
     id: section ? `section:${section.id}` : `unavailable:${title}`,
     title,
-    disabled:
-      section?.unavailable === true ||
-      (section === null && (!fallbackId || !props.canReadLiveDiffs)),
+    disabled: section === null,
     selected: section !== null && section.id === props.selectedSection?.id,
     onPress: () => {
-      const id = section?.id ?? fallbackId;
-      if (id) props.onSelectSection(id);
+      if (section) props.onSelectSection(section.id);
     },
   });
   return (
@@ -99,14 +92,14 @@ function ReviewHeader(
       subtitle={presentation.subtitle}
       onBack={props.onReturnToThread}
       hideBottomBorder
-      backInSplitView={{ accessibilityLabel: "Back to chat", icon: "chevron.left" }}
+      backInSplitView={{ accessibilityLabel: gt("Back to chat"), icon: "chevron.left" }}
       actions={
         props.showChangedFilesToggle
           ? [
               {
                 accessibilityLabel: panes.auxiliaryPaneVisible
-                  ? "Hide changed files"
-                  : "Show changed files",
+                  ? gt("Hide changed files")
+                  : gt("Show changed files"),
                 icon: "sidebar.right",
                 selected: panes.auxiliaryPaneVisible,
                 onPress: toggleAuxiliaryPane,
@@ -115,46 +108,79 @@ function ReviewHeader(
           : undefined
       }
       menus={[
-        ...(props.repositoryMenu.length > 1
-          ? [{ title: "Repository", icon: "folder" as const, items: props.repositoryMenu }]
-          : []),
         ...(presentation.gitMenu ? [presentation.gitMenu] : []),
         ...(props.showSectionToolbar
           ? [
               {
-                title: "Select diff",
+                title: gt("Select diff"),
                 icon: presentation.menuIcon,
                 items: [
                   {
                     id: "sections",
                     inline: true,
                     items: [
-                      sectionAction(props.sectionMenu.branchChanges, "Changes", "git:branch-range"),
+                      sectionAction(
+                        props.sectionMenu.branchChanges,
+                        gt("Changes", { $context: "diff section: branch changes" }),
+                      ),
                       sectionAction(
                         props.sectionMenu.workingTree,
-                        "Uncommitted",
-                        "git:working-tree",
+                        gt("Uncommitted", { $context: "diff section: working tree" }),
                       ),
-                      sectionAction(props.sectionMenu.latestTurn, "Latest turn"),
+                      sectionAction(props.sectionMenu.latestTurn, gt("Latest turn")),
+                    ],
+                  },
+                  {
+                    id: "files",
+                    inline: true,
+                    items: [
+                      {
+                        id: "hide-tests",
+                        title: gt("Hide test files"),
+                        icon: "line.3.horizontal.decrease",
+                        selected: props.fileFilter.hideTestFiles,
+                        onPress: props.fileFilter.toggle,
+                      },
                     ],
                   },
                   ...(props.sectionMenu.turns.length > 0
                     ? [
                         {
                           id: "turns",
-                          title: "Turn",
+                          title: gt("Turn", { $context: "agent turn, diff section menu" }),
                           items: props.sectionMenu.turns.map((section) => ({
                             id: `section:${section.id}`,
                             title: section.title,
                             subtitle: section.subtitle ?? undefined,
-                            disabled: section.unavailable === true,
                             selected: section.id === props.selectedSection?.id,
                             onPress: () => props.onSelectSection(section.id),
                           })),
                         },
                       ]
                     : []),
-                  ...props.comparisonMenu,
+                  ...(props.selectedSection?.repositoryGroups
+                    ? [
+                        {
+                          id: "repositories",
+                          title: gt("Repository"),
+                          items: [
+                            {
+                              id: "repository:all",
+                              title: gt("All repositories"),
+                              selected: props.selectedRepositoryKey === null,
+                              onPress: () => props.onSelectRepository(null),
+                            },
+                            ...props.selectedSection.repositoryGroups.map((group) => ({
+                              id: `repository:${group.key}`,
+                              title: group.name,
+                              subtitle: group.relativePath || undefined,
+                              selected: group.key === props.selectedRepositoryKey,
+                              onPress: () => props.onSelectRepository(group.key),
+                            })),
+                          ],
+                        },
+                      ]
+                    : []),
                   ...(presentation.refreshAction ? [presentation.refreshAction] : []),
                 ],
               },
@@ -169,15 +195,12 @@ const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";
 
 const ReviewNotice = function ReviewNotice(props: { readonly notice: string }) {
   return (
-    <View
-      className={cn(
-        "bg-warning px-4 py-3",
-        Platform.OS === "android" ? "m-2 rounded-[20px]" : "border-b border-warning-border",
-      )}
-    >
-      <Text className="text-xs font-t3-bold uppercase text-warning-foreground">Partial diff</Text>
+    <ContentBand tone="warning">
+      <Text className="text-xs font-t3-bold uppercase text-warning-foreground">
+        <T>Partial diff</T>
+      </Text>
       <Text className="text-xs leading-normal text-warning-foreground">{props.notice}</Text>
-    </View>
+    </ContentBand>
   );
 };
 
@@ -262,21 +285,7 @@ const ReviewFileNavigatorRow = function ReviewFileNavigatorRow(props: {
   };
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      className={
-        Platform.OS === "android"
-          ? cn(
-              "mt-1 min-h-12 justify-center rounded-[20px] px-3 py-2 active:bg-subtle",
-              selected && "bg-subtle-strong",
-            )
-          : selected
-            ? "mt-1 min-h-12 justify-center rounded-xl bg-subtle-strong px-3 py-2"
-            : "mt-1 min-h-12 justify-center rounded-xl px-3 py-2 active:bg-subtle"
-      }
-      onPress={handlePress}
-    >
+    <PaneListItem selected={selected} onPress={handlePress}>
       <Text
         className={
           selected
@@ -295,7 +304,7 @@ const ReviewFileNavigatorRow = function ReviewFileNavigatorRow(props: {
           -{formatDiffCount(file.deletions)}
         </Text>
       </View>
-    </Pressable>
+    </PaneListItem>
   );
 };
 
@@ -344,6 +353,7 @@ function ReviewFileNavigator({ files, sectionId, onSelectFile, ref }: ReviewFile
     setFileSelection({ sectionId, fileId });
     onSelectFile(fileId);
   };
+  const gt = useGT();
 
   const renderFile = ({ item }: { readonly item: ReviewNavigatorFile }) => (
     <ReviewFileNavigatorRow
@@ -354,10 +364,12 @@ function ReviewFileNavigator({ files, sectionId, onSelectFile, ref }: ReviewFile
   );
 
   return (
-    <View className="flex-1 ios:bg-sheet android:bg-header">
+    <SheetPane>
       <AppBar
-        title="Changed files"
-        subtitle={`${files.length} ${files.length === 1 ? "file" : "files"}`}
+        title={gt("Changed files")}
+        subtitle={gt("{count, plural, one {{count} file} other {{count} files}}", {
+          count: files.length,
+        })}
         hideBottomBorder
       />
       <ScreenContent insetHorizontal>
@@ -374,7 +386,7 @@ function ReviewFileNavigator({ files, sectionId, onSelectFile, ref }: ReviewFile
           renderItem={renderFile}
         />
       </ScreenContent>
-    </View>
+    </SheetPane>
   );
 }
 
@@ -384,6 +396,7 @@ type ReviewSheetProps = StaticScreenProps<{
 }>;
 
 export function ReviewSheet(props: ReviewSheetProps) {
+  const gt = useGT();
   const reduceMotion = useReduceMotionEnabled();
   const { nativeReviewDiffStyle } = useAppearanceCodeSurface();
   const { panes } = useWorkspacePaneState();
@@ -393,23 +406,16 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const { themeAppearance: selectedTheme } = useAppearancePreferences();
   const { environmentId, threadId } = props.route.params;
   const environment = useEnvironmentPresentation(environmentId);
-  const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, "environment retry");
+  const retryEnvironment = useRetryEnvironment();
   const isEnvironmentReady = environment.presentation?.connection.phase === "connected";
   const { draftMessage, draftContext } = useThreadDraftForThread({ environmentId, threadId });
-  const repository = useReviewRepository();
-  const selectedThreadCwd = repository.cwd;
-  const checkoutKey = repository.checkout?.id === "primary" ? undefined : repository.checkout?.id;
-  const reviewCache = useReviewCacheForThread({ environmentId, threadId, checkoutKey });
-  const columnMetrics = useNativeColumnLayoutMetrics();
-  const safeArea = columnMetrics?.safeArea ?? insets;
+  const reviewCache = useReviewCacheForThread({ environmentId, threadId });
+  const { selectedThreadCwd } = useSelectedThreadWorktree();
   const topContentInset = useContentTopInset();
-  const bottomContentInset =
-    Platform.OS === "ios" ? safeArea.bottom + 8 : Math.max(insets.bottom, 18) + 18;
+  const bottomContentInset = useSheetContentBottomInset();
 
   const {
     error,
-    canReadLiveDiffs,
-    commits,
     reviewSections,
     selectedSection,
     refreshSelectedSection,
@@ -420,33 +426,45 @@ export function ReviewSheet(props: ReviewSheetProps) {
     environmentId,
     threadId,
     reviewCache,
-    cwd: selectedThreadCwd,
-    historical: repository.isHistorical,
-    checkoutKey,
-    baseRef: repository.baseRef,
-    commitSha: repository.commitSha,
   });
   useReviewDiffPrewarming({
     threadKey: reviewCache.threadKey,
     sections: reviewSections,
     selectedSectionId: selectedSection?.id ?? null,
   });
+  const [repositorySelection, setRepositorySelection] = useState<{
+    readonly sectionId: string;
+    readonly key: string;
+  } | null>(null);
+  const repositoryGroups = selectedSection?.repositoryGroups;
+  const selectedRepository =
+    repositorySelection !== null && repositorySelection.sectionId === selectedSection?.id
+      ? (repositoryGroups?.find((group) => group.key === repositorySelection.key) ?? null)
+      : null;
   const {
     headerDiffSummary,
     nativeReviewDiffData,
     parsedDiff,
+    allFiles,
+    fileFilter,
     pendingReviewCommentCount,
+    sectionFiles,
     loadVisibleFile,
     isPending: areFilePatchesPending,
   } = useReviewDiffData({
     threadKey: reviewCache.threadKey,
     environmentId,
     cwd: selectedThreadCwd,
-    baseRef: repository.baseRef,
-    commitSha: repository.commitSha,
     selectedSection,
     draftMessage,
     draftContext,
+    repositoryFilter:
+      selectedRepository === null || repositoryGroups === undefined
+        ? null
+        : {
+            folder: selectedRepository.relativePath,
+            folders: repositoryGroups.map((group) => group.relativePath).join("\0"),
+          },
   });
   // Expo may return null before registration or in older binaries; use the fallback.
   const NativeReviewDiffView = resolveNativeReviewDiffView();
@@ -470,10 +488,12 @@ export function ReviewSheet(props: ReviewSheetProps) {
   }
   const reviewFileNavigatorRef = useRef<ReviewFileNavigatorHandle>(null);
   const reviewFiles = parsedDiff.kind === "files" ? parsedDiff.files : [];
+  // Hidden files keep their viewed and expanded state for when they are shown again.
   const fileVisibility = useReviewFileVisibility({
     threadKey: reviewCache.threadKey,
     sectionId: selectedSection?.id ?? null,
-    files: reviewFiles,
+    files: allFiles,
+    sectionFiles,
     cachedExpandedFileIds: selectedSection?.id
       ? reviewCache.expandedFileIdsBySection[selectedSection.id]
       : undefined,
@@ -488,9 +508,12 @@ export function ReviewSheet(props: ReviewSheetProps) {
     selectedSection,
     nativeReviewDiffData,
   });
+  const reviewContentKey = selectedSection
+    ? `${selectedSection.id}:${selectedRepository?.key ?? ""}`
+    : null;
   const nativeBridge = useNativeReviewDiffBridge({
     threadKey: reviewCache.threadKey,
-    sectionId: selectedSection?.id ?? null,
+    sectionId: reviewContentKey,
     diff: selectedSection?.diff,
     data: nativeReviewDiffData,
     collapsedFileIds,
@@ -515,6 +538,12 @@ export function ReviewSheet(props: ReviewSheetProps) {
     reportShowcaseSceneRendered({ scene: "review", themeId: nativeBridge.themeId });
   };
 
+  const handleSelectRepository = (key: string | null) => {
+    commentSelection.clearSelection();
+    setRepositorySelection(
+      key === null || !selectedSection ? null : { sectionId: selectedSection.id, key },
+    );
+  };
   const handleSelectFile = async (fileId: string | null) => {
     loadVisibleFile(fileId, true);
     commentSelection.clearSelection();
@@ -542,7 +571,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     <ReviewFileNavigator
       ref={reviewFileNavigatorRef}
       files={nativeReviewDiffData.files}
-      sectionId={selectedSection ? `${reviewCache.threadKey}:${selectedSection.id}` : null}
+      sectionId={selectedSection?.id ?? null}
       onSelectFile={(fileId) => void handleSelectFile(fileId)}
     />
   );
@@ -589,10 +618,8 @@ export function ReviewSheet(props: ReviewSheetProps) {
     });
   };
   const androidHeaderSubtitle = [
-    repository.checkouts.length + repository.historyCheckouts.length > 1
-      ? repository.checkout?.title
-      : null,
     selectedSection?.title,
+    selectedRepository?.name,
     headerDiffSummary.additions,
     headerDiffSummary.deletions,
   ]
@@ -606,26 +633,50 @@ export function ReviewSheet(props: ReviewSheetProps) {
     NativeReviewDiffView !== null;
   const showChangedFilesToggle = panes.supportsAuxiliaryPane && showChangedFilesPane;
 
+  const allFilesHidden = reviewFiles.length === 0 && fileFilter.hiddenCount > 0;
   const listHeader = (() => {
     const children: ReactElement[] = [];
 
     if (error) {
       children.push(
-        <View
-          key="review-error"
-          className={cn(
-            "bg-card px-4 py-3",
-            Platform.OS === "android" ? "m-2 rounded-[20px]" : "border-b border-border",
-          )}
-        >
-          <Text className="text-sm font-t3-bold text-foreground">Review unavailable</Text>
+        <ContentBand key="review-error">
+          <Text className="text-sm font-t3-bold text-foreground">
+            <T>Review unavailable</T>
+          </Text>
           <Text className="text-xs leading-normal text-foreground-muted">{error}</Text>
-        </View>,
+        </ContentBand>,
       );
     }
 
     if (parsedDiffNotice) {
       children.push(<ReviewNotice key="review-notice" notice={parsedDiffNotice} />);
+    }
+
+    if (selectedSection?.unlistedRepositories) {
+      children.push(
+        <ContentBand key="review-unlisted-repositories">
+          <Text className="text-xs leading-normal text-foreground-muted">
+            <T>
+              This turn's changes in <Var>{selectedSection.unlistedRepositories.join(", ")}</Var>{" "}
+              cannot be listed.
+            </T>
+          </Text>
+        </ContentBand>,
+      );
+    }
+
+    if (allFilesHidden) {
+      children.push(
+        <EmptyState
+          key="review-tests-hidden"
+          title={gt("Only test files changed")}
+          detail={gt("Test files are hidden from this review.")}
+          action={
+            <Button label={gt("Show test files")} tone="contrast" onPress={fileFilter.showAll} />
+          }
+          variant="plain"
+        />,
+      );
     }
 
     if (children.length === 0) {
@@ -635,18 +686,18 @@ export function ReviewSheet(props: ReviewSheetProps) {
     return <>{children}</>;
   })();
   const headerSubtitle = [
-    repository.checkouts.length + repository.historyCheckouts.length > 1
-      ? repository.checkout?.title
-      : null,
+    selectedRepository?.name,
     headerDiffSummary.additions,
     headerDiffSummary.deletions,
     pendingReviewCommentCount > 0
-      ? `${pendingReviewCommentCount} comment${pendingReviewCommentCount === 1 ? "" : "s"}`
+      ? gt("{count, plural, one {{count} comment} other {{count} comments}}", {
+          count: pendingReviewCommentCount,
+        })
       : null,
   ]
     .filter(Boolean)
     .join(" · ");
-  const headerTitleText = selectedSection?.title ?? "Review changes";
+  const headerTitleText = selectedSection?.title ?? gt("Review changes");
 
   return (
     <>
@@ -662,91 +713,28 @@ export function ReviewSheet(props: ReviewSheetProps) {
         title={headerTitleText}
         subtitle={headerSubtitle}
         androidSubtitle={androidHeaderSubtitle}
-        isPrimaryCheckout={repository.checkout?.id === "primary"}
         selectedThreadCwd={selectedThreadCwd}
-        repositoryMenu={[
-          ...repository.checkouts.map((checkout) => ({
-            id: checkout.id,
-            title: checkout.title,
-            subtitle: checkout.checkoutPath,
-            selected: !repository.isHistorical && checkout.id === repository.checkout?.id,
-            onPress: () => repository.selectRepository(checkout.id),
-          })),
-          ...(repository.historyCheckouts.length > 0
-            ? [
-                {
-                  id: "history",
-                  title: "Detached project history",
-                  items: repository.historyCheckouts.map((checkout) => ({
-                    id: checkout.id,
-                    title: checkout.title,
-                    selected: repository.isHistorical && checkout.id === repository.checkout?.id,
-                    onPress: () => repository.selectHistory(checkout.id),
-                  })),
-                },
-              ]
-            : []),
-        ]}
-        canReadLiveDiffs={canReadLiveDiffs}
-        comparisonMenu={
-          !canReadLiveDiffs
-            ? []
-            : [
-                {
-                  id: "base",
-                  title: "Base branch",
-                  subtitle: repository.baseRef ?? "Automatic",
-                  onPress: () =>
-                    Dialog.prompt({
-                      title: "Base branch",
-                      message: "Enter a branch or ref. Leave empty to choose automatically.",
-                      initialValue: repository.baseRef ?? "",
-                      confirmText: "Compare",
-                      onConfirm: (value) => repository.selectBase(value.trim() || null),
-                    }),
-                },
-                {
-                  id: "commits",
-                  title: "Commit",
-                  items: [
-                    {
-                      id: "branch",
-                      title: "All branch changes",
-                      selected: repository.commitSha === null,
-                      onPress: () => repository.selectCommit(null),
-                    },
-                    ...commits.map((commit) => ({
-                      id: commit.sha,
-                      title: commit.subject,
-                      subtitle: commit.sha.slice(0, 7),
-                      selected: repository.commitSha === commit.sha,
-                      onPress: () => {
-                        repository.selectCommit(commit.sha);
-                        selectSection(`commit:${commit.sha}`);
-                      },
-                    })),
-                  ],
-                },
-              ]
-        }
         sectionMenu={sectionMenu}
         selectedSection={selectedSection}
         showSectionToolbar={showSectionToolbar}
         showChangedFilesToggle={showChangedFilesToggle}
+        selectedRepositoryKey={selectedRepository?.key ?? null}
+        onSelectRepository={handleSelectRepository}
+        fileFilter={fileFilter}
         onRefresh={handlePullToRefresh}
-        onSelectSection={(id) => {
-          if (id.startsWith("git:")) repository.selectCommit(null);
-          selectSection(id);
-        }}
+        onSelectSection={selectSection}
         onReturnToThread={handleReturnToThread}
       />
 
       <ScreenContent>
-        <View className="flex-1 bg-sheet android:bg-sheet-solid">
+        <View className="flex-1 bg-sheet">
           {showConnectionNotice ? (
             <View className="flex-1" style={{ paddingTop: topContentInset }}>
               <EnvironmentConnectionNotice
-                environmentLabel={environment.presentation?.entry.target.label ?? "Environment"}
+                environmentLabel={
+                  environment.presentation?.entry.target.label ??
+                  gt("Environment", { $context: "fallback name for a server" })
+                }
                 connection={
                   environment.presentation?.connection ?? {
                     phase: "available",
@@ -754,11 +742,14 @@ export function ReviewSheet(props: ReviewSheetProps) {
                     traceId: null,
                   }
                 }
-                resourceName="review"
+                resource="review"
                 onRetry={handleRetryEnvironment}
               />
             </View>
-          ) : selectedSection && parsedDiff.kind === "files" && NativeReviewDiffView ? (
+          ) : selectedSection &&
+            parsedDiff.kind === "files" &&
+            NativeReviewDiffView &&
+            !allFilesHidden ? (
             <View
               className="flex-1"
               style={{
@@ -783,7 +774,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
                     appearanceScheme={selectedTheme}
                     collapsedFileIdsJson={nativeBridge.collapsedFileIdsJson}
                     collapsedCommentIdsJson={nativeBridge.collapsedCommentIdsJson}
-                    contentResetKey={`${reviewCache.threadKey}:${selectedSection.id}`}
+                    contentResetKey={`${reviewCache.threadKey}:${reviewContentKey}`}
                     contentWidth={NATIVE_REVIEW_DIFF_CONTENT_WIDTH}
                     contentInsetTop={listHeader ? 0 : topContentInset}
                     contentInsetBottom={bottomContentInset}
@@ -810,8 +801,8 @@ export function ReviewSheet(props: ReviewSheetProps) {
             <ScrollView
               key={fallbackScrollViewKey}
               contentContainerStyle={
-                Platform.OS === "android" && (parsedDiff.kind === "empty" || !selectedSection)
-                  ? { flexGrow: 1, justifyContent: "center" }
+                parsedDiff.kind === "empty" || !selectedSection
+                  ? contentStatusContainerStyle
                   : undefined
               }
               contentInsetAdjustmentBehavior="never"
@@ -832,59 +823,23 @@ export function ReviewSheet(props: ReviewSheetProps) {
               {listHeader}
               {!selectedSection ? (
                 error ? null : (
-                  <View
-                    className={
-                      Platform.OS === "android"
-                        ? "items-center px-6 py-5"
-                        : "border-b border-border bg-card px-4 py-5"
-                    }
-                  >
-                    <Text className="text-sm font-t3-bold text-foreground">No review diffs</Text>
-                    <Text
-                      className={cn(
-                        "text-xs leading-normal text-foreground-muted",
-                        Platform.OS === "android" && "mt-2 text-center",
-                      )}
-                    >
-                      This thread has no ready turn diffs and the worktree diff is empty.
-                    </Text>
-                  </View>
-                )
-              ) : selectedSection.isLoading && selectedSection.diff === null ? (
-                <View
-                  className={cn(
-                    "items-center gap-3 px-4 py-6",
-                    Platform.OS !== "android" && "border-b border-border bg-card",
-                  )}
-                >
-                  <AppActivityIndicator size="small" />
-                  <Text className="text-xs text-foreground-muted">Loading diff…</Text>
-                </View>
-              ) : parsedDiff.kind === "empty" ? (
-                <View
-                  className={
-                    Platform.OS === "android"
-                      ? "items-center px-6 py-5"
-                      : "border-b border-border bg-card px-4 py-5"
-                  }
-                >
-                  <Text className="text-sm font-t3-bold text-foreground">No changes</Text>
-                  <Text
-                    className={cn(
-                      "text-xs leading-normal text-foreground-muted",
-                      Platform.OS === "android" && "mt-2 text-center",
+                  <ContentStatus
+                    title={gt("No review diffs")}
+                    detail={gt(
+                      "This thread has no ready turn diffs and the worktree diff is empty.",
                     )}
-                  >
-                    {selectedSection.subtitle ?? "This diff is empty."}
-                  </Text>
-                </View>
+                  />
+                )
+              ) : error && selectedSection.diff === null ? null : selectedSection.isLoading &&
+                selectedSection.diff === null ? (
+                <ContentStatus loading detail={gt("Loading diff…")} />
+              ) : parsedDiff.kind === "empty" ? (
+                <ContentStatus
+                  title={gt("No changes")}
+                  detail={selectedSection.subtitle ?? gt("This diff is empty.")}
+                />
               ) : parsedDiff.kind === "raw" ? (
-                <View
-                  className={cn(
-                    "gap-3 bg-card px-4 py-4",
-                    Platform.OS === "android" ? "m-2 rounded-[20px]" : "border-b border-border",
-                  )}
-                >
+                <ContentBand spacing="roomy">
                   <Text className="text-xs leading-normal text-foreground-muted">
                     {parsedDiff.reason}
                   </Text>
@@ -893,23 +848,18 @@ export function ReviewSheet(props: ReviewSheetProps) {
                       {parsedDiff.text}
                     </Text>
                   </ScrollView>
-                </View>
-              ) : parsedDiff.kind === "files" ? (
-                <View
-                  className={cn(
-                    "gap-3 bg-card px-4 py-4",
-                    Platform.OS === "android" ? "m-2 rounded-[20px]" : "border-b border-border",
-                  )}
-                >
+                </ContentBand>
+              ) : parsedDiff.kind === "files" && !allFilesHidden ? (
+                <ContentBand spacing="roomy">
                   <Text className="text-xs leading-normal text-foreground-muted">
-                    Native diff view unavailable. Showing the raw patch.
+                    <T>Native diff view unavailable. Showing the raw patch.</T>
                   </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
                     <Text selectable className="font-mono text-xs leading-relaxed text-foreground">
                       {selectedSection?.diff ?? ""}
                     </Text>
                   </ScrollView>
-                </View>
+                </ContentBand>
               ) : null}
             </ScrollView>
           )}

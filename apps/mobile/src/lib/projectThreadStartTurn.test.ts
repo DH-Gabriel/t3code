@@ -36,7 +36,6 @@ describe("project thread title", () => {
     const wire = serializeComposerMessageForServer(text, undefined);
     const spec = {
       projectId: ProjectId.make("project"),
-      repositoryProjectIds: [ProjectId.make("extra-project")],
       projectCwd: "/workspace",
       threadId: "image-thread",
       commandId: "image-command",
@@ -58,7 +57,6 @@ describe("project thread title", () => {
 
     expect(input.titleSeed).toBe(title);
     expect(input.bootstrap.createThread.title).toBe(input.titleSeed);
-    expect(input.bootstrap.createThread.repositoryProjectIds).toEqual(spec.repositoryProjectIds);
     expect(input.message.attachments).toEqual(uploadedAttachments);
     expect(input.message.text).toBe(wire.text);
     const relaunched = buildProjectThreadStartTurnInput({
@@ -70,5 +68,34 @@ describe("project thread title", () => {
     expect(relaunched.titleSeed).toBe(title);
     expect(relaunched.message.text).toBe(wire.text);
     expect(relaunched.message.attachments).toEqual(uploadedAttachments);
+  });
+
+  it("starts a worktree of a plain project folder from each repository's default branch", () => {
+    const input = buildProjectThreadStartTurnInput({
+      projectId: ProjectId.make("project"),
+      projectCwd: "/workspace",
+      threadId: "thread",
+      commandId: "command",
+      messageId: "message",
+      createdAt: "2026-09-04T00:00:00Z",
+      text: "Fix the build",
+      uploadedAttachments: [],
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      workspaceMode: "worktree",
+      branch: null,
+      worktreePath: null,
+      startFromOrigin: false,
+      worktreeRepositories: ["/workspace/api"],
+      worktreeBranchName: "t3/new",
+    });
+
+    expect(input.bootstrap.prepareWorktree).toEqual({
+      projectCwd: "/workspace",
+      baseBranch: "HEAD",
+      branch: "t3/new",
+      repositories: [{ path: "/workspace/api" }],
+    });
   });
 });

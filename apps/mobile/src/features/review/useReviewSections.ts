@@ -1,6 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
 import { Atom } from "effect/reactivity";
+import { useMemo } from "react";
+import { msg, useMessages } from "gt-react-native";
 
 import { deriveThreadCheckpointSummaries } from "@t3tools/client-runtime/state/thread-checkpoints";
 import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from "@t3tools/contracts";
@@ -9,15 +11,18 @@ import { useCheckpointDiff } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { lastReviewGitSectionsAtom, reviewEnvironment } from "../../state/review";
-import { lastReviewTurnDiffsAtom } from "../../state/reviewTurnDiffs";
+import { lastReviewTurnDiffsAtom, reviewTurnDiffText } from "../../state/reviewTurnDiffs";
 import { environmentSession } from "../../state/session";
 import { useSelectedThreadProjection } from "../../state/use-thread-detail";
+import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
+import { useThreadSelection } from "../../state/use-thread-selection";
 import {
   buildReviewSectionItems,
   getReadyReviewCheckpoints,
   getReviewSectionIdForCheckpoint,
   resolveReviewSelectedSectionId,
   reviewTurnDiffsBySectionId,
+  type ReviewGitSectionKind,
   type ReviewSectionItem,
 } from "./reviewModel";
 import { setReviewSelectedSectionId, type ReviewCacheForThread } from "./reviewState";
@@ -36,99 +41,78 @@ export function useReviewSections(input: {
   readonly environmentId?: EnvironmentId;
   readonly threadId?: ThreadId;
   readonly reviewCache: ReviewCacheForThread;
-  readonly cwd: string | null;
-  readonly historical?: boolean;
-  readonly checkoutKey?: string;
-  readonly baseRef: string | null;
-  readonly commitSha: string | null;
 }) {
   const { environmentId, reviewCache, threadId } = input;
+  const messages = useMessages();
   const enabled = input.enabled ?? true;
   const fileAccessSession = useEnvironmentQuery(
     environmentId === undefined ? null : environmentSession.sessionStateAtom(environmentId),
   );
   const fileEnvironment = useEnvironmentPresentation(environmentId ?? null);
-  const fileAccess = resolveFilesystemReadAccess({
-    isCatalogReady: fileEnvironment.isReady,
-    connection: fileEnvironment.presentation?.connection ?? null,
-    session: fileAccessSession.data,
-    sessionError: fileAccessSession.error,
-  });
+  const fileAccess = resolveFilesystemReadAccess(
+    {
+      isCatalogReady: fileEnvironment.isReady,
+      connection: fileEnvironment.presentation?.connection ?? null,
+      session: fileAccessSession.data,
+      sessionError: fileAccessSession.error,
+    },
+    messages,
+  );
   const { canReadFiles } = fileAccess;
   const selectedThread = useSelectedThreadProjection();
-  const selectedThreadCwd = input.cwd;
-  const diffPreview = useEnvironmentQuery(
-    !input.historical &&
-      canReadFiles &&
-      enabled &&
-      environmentId !== undefined &&
-      selectedThreadCwd !== null
+  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { selectedThreadProject } = useThreadSelection();
+  const diffPreviewQuery = (sourceKind: ReviewGitSectionKind) =>
+    canReadFiles && enabled && environmentId !== undefined && selectedThreadCwd !== null
       ? reviewEnvironment.diffPreview({
           environmentId,
-          input: {
-            cwd: selectedThreadCwd,
-            ...(input.baseRef ? { baseRef: input.baseRef } : {}),
-            ...(input.commitSha ? { commitSha: input.commitSha } : {}),
-          },
+          input: { cwd: selectedThreadCwd, sourceKind },
         })
-      : null,
-  );
-  const commits = useEnvironmentQuery(
-    !input.historical &&
-      canReadFiles &&
-      enabled &&
-      environmentId !== undefined &&
-      selectedThreadCwd !== null
-      ? reviewEnvironment.branchCommits({
-          environmentId,
-          input: { cwd: selectedThreadCwd, ...(input.baseRef ? { baseRef: input.baseRef } : {}) },
-        })
-      : null,
-  );
+      : null;
+  const workingTreePreview = useEnvironmentQuery(diffPreviewQuery("working-tree"));
+  const branchPreview = useEnvironmentQuery(diffPreviewQuery("branch-range"));
   const lastGitSections = useAtomValue(
     environmentId !== undefined && selectedThreadCwd !== null
-      ? lastReviewGitSectionsAtom(environmentId, selectedThreadCwd, input.baseRef, input.commitSha)
+      ? lastReviewGitSectionsAtom(environmentId, selectedThreadCwd)
       : NO_GIT_SECTIONS_ATOM,
+  );
+
+  const gitSections = (
+    [
+      ["working-tree", workingTreePreview],
+      ["branch-range", branchPreview],
+    ] as const
+  ).flatMap(([kind, preview]) =>
+    (preview.data?.incomplete
+      ? lastGitSections
+      : (preview.data?.sources ?? lastGitSections)
+    ).filter((source) => source.kind === kind),
   );
 
   const lastTurnDiffs = useAtomValue(
     environmentId !== undefined && threadId !== undefined
-      ? lastReviewTurnDiffsAtom(environmentId, threadId, input.checkoutKey)
+      ? lastReviewTurnDiffsAtom(environmentId, threadId)
       : NO_TURN_DIFFS_ATOM,
   );
 
-  const scopeIds = new Set(
-    selectedThread?.projection.checkpointScopes
-      .filter(
-        (scope) => (scope.repositoryAttachmentId ?? "primary") === (input.checkoutKey ?? "primary"),
-      )
-      .map((scope) => scope.id),
+  const readyCheckpoints = getReadyReviewCheckpoints(
+    selectedThread === null ? [] : deriveThreadCheckpointSummaries(selectedThread.projection),
   );
-  const checkpoints =
-    selectedThread === null
-      ? []
-      : deriveThreadCheckpointSummaries({
-          ...selectedThread.projection,
-          checkpoints: selectedThread.projection.checkpoints.filter((checkpoint) =>
-            scopeIds.has(checkpoint.scopeId),
-          ),
-        });
-  const readyCheckpoints = getReadyReviewCheckpoints(checkpoints);
   const checkpointBySectionId = new Map(
     readyCheckpoints.map((checkpoint) => [getReviewSectionIdForCheckpoint(checkpoint), checkpoint]),
   );
   // Turns show their last answered diff; the active turn's live query below overrides it.
   // Section ids and the selection do not depend on the live query, so they are resolved first.
   const cachedSections = buildReviewSectionItems({
-    checkoutKey: input.checkoutKey,
-    ...(selectedThreadCwd ? { checkoutPath: selectedThreadCwd } : {}),
-    checkpoints,
-    gitSections:
-      !input.historical && (canReadFiles || fileAccess.isPending)
-        ? (diffPreview.data?.sources ?? lastGitSections)
-        : [],
+    checkpoints: readyCheckpoints,
+    gitSections: canReadFiles || fileAccess.isPending ? gitSections : [],
     turnDiffById: reviewTurnDiffsBySectionId(readyCheckpoints, lastTurnDiffs),
-    loadingGitSections: !input.historical && (fileAccess.isPending || diffPreview.isPending),
+    gitSectionStates: {
+      "working-tree": gitSectionState(fileAccess.isPending, workingTreePreview),
+      "branch-range": gitSectionState(fileAccess.isPending, branchPreview),
+    },
+    ...(selectedThreadProject ? { rootName: selectedThreadProject.title } : {}),
+    resolve: messages,
   });
   const selectedSectionId = resolveReviewSelectedSectionId(
     cachedSections,
@@ -148,15 +132,19 @@ export function useReviewSections(input: {
       enabled && activeCheckpoint ? Math.max(0, activeCheckpoint.checkpointTurnCount - 1) : null,
     toTurnCount: enabled ? (activeCheckpoint?.checkpointTurnCount ?? null) : null,
     ignoreWhitespace: false,
-    ...(input.checkoutKey ? { repositoryAttachmentId: input.checkoutKey } : {}),
   });
+  const activeTurnDiffData = activeTurnDiff.data;
+  const activeTurnDiffText = useMemo(
+    () => (activeTurnDiffData == null ? null : reviewTurnDiffText(activeTurnDiffData)),
+    [activeTurnDiffData],
+  );
 
   const reviewSections = cachedSections.map((section): ReviewSectionItem => {
     if (section.kind === "turn") {
       return section.id === activeSectionId
         ? {
             ...section,
-            diff: activeTurnDiff.data?.diff ?? section.diff,
+            diff: activeTurnDiffText ?? section.diff,
             isLoading: activeTurnDiff.isPending,
           }
         : section;
@@ -167,6 +155,13 @@ export function useReviewSections(input: {
   const selectedSection =
     reviewSections.find((section) => section.id === selectedSectionId) ?? null;
 
+  const selectedGitPreview =
+    selectedSection?.kind === "working-tree"
+      ? workingTreePreview
+      : selectedSection?.kind === "branch-range"
+        ? branchPreview
+        : null;
+
   const refreshSelectedSection = async () => {
     if (!enabled) {
       return;
@@ -175,7 +170,12 @@ export function useReviewSections(input: {
       activeTurnDiff.refresh();
       return;
     }
-    diffPreview.refresh();
+    if (selectedGitPreview) {
+      selectedGitPreview.refresh();
+    } else {
+      workingTreePreview.refresh();
+      branchPreview.refresh();
+    }
   };
 
   const selectSection = (sectionId: string) => {
@@ -185,19 +185,28 @@ export function useReviewSections(input: {
   };
 
   return {
-    canReadLiveDiffs: !input.historical && canReadFiles,
-    commits: commits.data?.commits ?? [],
     error:
-      diffPreview.error ??
-      (selectedSection?.kind === "turn" ? activeTurnDiff.error : null) ??
+      (selectedSection?.kind === "turn"
+        ? activeTurnDiff.error
+        : (selectedGitPreview?.error ?? null)) ??
       (selectedSection === null && !fileAccess.isPending && !canReadFiles
-        ? (fileAccess.error ?? "This connection cannot read local diffs.")
+        ? (fileAccess.error ?? messages(msg("This connection cannot read local diffs.")))
         : null),
     isSelectedSectionPending:
-      selectedSection?.kind === "turn" ? activeTurnDiff.isPending : diffPreview.isPending,
+      selectedSection?.kind === "turn"
+        ? activeTurnDiff.isPending
+        : (selectedGitPreview?.isPending ?? false),
     reviewSections,
     selectedSection,
     refreshSelectedSection,
     selectSection,
   };
+}
+
+function gitSectionState(
+  isFileAccessPending: boolean,
+  preview: { readonly isPending: boolean; readonly error: string | null },
+) {
+  if (isFileAccessPending || preview.isPending) return "loading";
+  return preview.error === null ? null : "failed";
 }
