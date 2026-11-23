@@ -422,9 +422,15 @@ describe("ssh tunnel scripts", () => {
           NodeChildProcess.execFileSync("sh", ["-c", `command -v ${tool}`], {
             encoding: "utf8",
           }).trim(),
-          NodePath.join(bin, tool),
+          NodePath.join(bin, tool === "tar" ? "tar-system" : tool),
         );
       }
+      // BSD tar gunzips internally; model a tar that needs the external gzip command.
+      NodeFS.writeFileSync(
+        NodePath.join(bin, "tar"),
+        '#!/bin/sh\ngzip -dc "$2" > "$2.tar" || exit "$?"\nexec tar-system -xf "$2.tar" -C "$4" --strip-components=1\n',
+        { mode: 0o755 },
+      );
       NodeFS.writeFileSync(
         NodePath.join(bin, "uname"),
         '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac\n',
