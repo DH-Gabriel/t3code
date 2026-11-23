@@ -866,7 +866,7 @@ describe("isSourceRunning for Firefox", () => {
 
         yield* fileSystem.symlink(`127.0.0.1:+${process.pid}`, `${profile}/lock`);
         assert.isTrue(yield* isSourceRunning(firefox, context));
-      }),
+      }).pipe(Effect.provideService(HostProcess.Addresses, Effect.succeed(new Set(["127.0.0.1"])))),
     ),
   );
 
