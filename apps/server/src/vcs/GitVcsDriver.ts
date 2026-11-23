@@ -1534,6 +1534,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             args: [
               ...indexConfig,
               ...durableWrite,
+              // Batch fsync can migrate Git's temporary object directory before its bulk pack closes.
+              "-c",
+              "core.fsyncMethod=fsync",
               ...longPaths,
               // safecrlf=true refuses LF files under CRLF conversion; capture them as Git's default does.
               "-c",
