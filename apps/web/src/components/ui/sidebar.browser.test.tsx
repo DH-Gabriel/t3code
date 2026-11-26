@@ -190,7 +190,7 @@ describe("Sidebar", () => {
     await vi.waitFor(() => expect(sidebar.dataset.state).toBe("collapsed"));
     expect(container.getBoundingClientRect().right).toBe(0);
     expect(onResize).toHaveBeenLastCalledWith(200);
-    expect(sidebar.inert).toBe(true);
+    expect(container.inert).toBe(true);
     const handle = screen.container.querySelector<HTMLElement>(
       '[data-slot="sidebar-restore-handle"]',
     )!;
@@ -236,7 +236,7 @@ describe("Sidebar", () => {
     await vi.waitFor(() => expect(sidebar.dataset.state).toBe("expanded"));
     expect(container.getBoundingClientRect().left).toBe(0);
     expect(onResize).toHaveBeenLastCalledWith(258);
-    expect(sidebar.inert).toBe(false);
+    expect(container.inert).toBe(false);
   });
 
   it.each(["pointercancel", "lostpointercapture", "blur"])(

@@ -599,8 +599,10 @@ it.effect.each([
 it.effect("closes connections beyond a forward's limit without tunnelling them", () =>
   Effect.gen(function* () {
     const endpoint = yield* listenEndpoint;
+    // Owner lookups are covered separately. Keep this test about the connection limit.
     const tunnel = yield* makeTunnel(
       `ws://127.0.0.1:${addressPort(endpoint.server)}/api/preview/tunnel`,
+      Layer.succeed(HostProcess.Platform, "win32"),
     );
     const forward = yield* tunnel.forward({
       environmentId: EnvironmentId.make("remote"),
@@ -625,7 +627,6 @@ it.effect("closes connections beyond a forward's limit without tunnelling them",
       () =>
         new Promise<boolean>((resolve, reject) => {
           const socket = NodeNet.connect(forward.localPort, "127.0.0.1");
-          socket.on("error", () => {});
           socket.on("close", () => resolve(true));
           socket.on("data", () => resolve(false));
           socket.on("error", (error: NodeJS.ErrnoException) => {
