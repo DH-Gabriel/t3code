@@ -9,6 +9,13 @@ import { AsyncResult } from "effect/reactivity";
 import {
   ADD_PROJECT_SCOPE_ITEM_VALUE,
   filterSidebarProjectScopeItems,
+  filterSidebarV2VisibleThreads as filterScopedThreads,
+  olderSettledScopes,
+  projectGroupsInEnvironmentScope,
+  resolveSidebarEnvironmentScope,
+  resolveSidebarScopedProjectKeys,
+  sidebarEnvironmentScopeOptions,
+  toggleSidebarEnvironmentScope,
   shouldCreateNewThreadInCurrentProject,
   resolveScopedNewThreadProjectRef,
   deleteSelectedThreadEntries,
@@ -1854,5 +1861,122 @@ describe("filterSidebarProjectScopeItems", () => {
 
     expect(filter("")).toEqual([ADD_PROJECT_SCOPE_ITEM_VALUE, "all", "p1"]);
     expect(filter("project")).toEqual(["p1"]);
+  });
+});
+
+describe("sidebar environment scope", () => {
+  const laptop = EnvironmentId.make("env-laptop");
+  const vps = EnvironmentId.make("env-vps");
+  const studio = EnvironmentId.make("env-studio");
+  const options = sidebarEnvironmentScopeOptions([
+    { environmentId: vps, label: "VPS" },
+    { environmentId: laptop, label: "Laptop" },
+    { environmentId: studio, label: "Studio" },
+  ]);
+  const sharedRepo = {
+    projectKey: "github.com/pingdotgg/t3code",
+    memberProjectRefs: [
+      { environmentId: laptop, projectId: ProjectId.make("t3-laptop") },
+      { environmentId: vps, projectId: ProjectId.make("t3-vps") },
+    ],
+  };
+  const vpsOnly = {
+    projectKey: "vps-only",
+    memberProjectRefs: [{ environmentId: vps, projectId: ProjectId.make("ops") }],
+  };
+  const projects = [
+    { environmentId: laptop, id: "t3-laptop" },
+    { environmentId: vps, id: "t3-vps" },
+    { environmentId: vps, id: "ops" },
+    { environmentId: studio, id: "studio-app" },
+  ];
+
+  it("offers environments sorted by label", () => {
+    expect(options.map((option) => option.label)).toEqual(["Laptop", "Studio", "VPS"]);
+  });
+
+  it("reads a stored scope with no offered environment, or every one, as all environments", () => {
+    expect(resolveSidebarEnvironmentScope([], options)).toBeNull();
+    expect(resolveSidebarEnvironmentScope(["env-gone"], options)).toBeNull();
+    expect(resolveSidebarEnvironmentScope([laptop, vps, studio], options)).toBeNull();
+    expect(resolveSidebarEnvironmentScope(["env-gone", vps], options)).toEqual(new Set([vps]));
+  });
+
+  it("narrows from all to the picked environment, then adds and removes picks", () => {
+    expect(toggleSidebarEnvironmentScope(null, vps, options)).toEqual([vps]);
+    expect(toggleSidebarEnvironmentScope(new Set([vps]), laptop, options)).toEqual([vps, laptop]);
+    expect(toggleSidebarEnvironmentScope(new Set([vps, laptop]), vps, options)).toEqual([laptop]);
+    expect(toggleSidebarEnvironmentScope(new Set([vps, laptop]), studio, options)).toEqual([]);
+  });
+
+  it("keeps project groups with a member in a scoped environment", () => {
+    expect(projectGroupsInEnvironmentScope([sharedRepo, vpsOnly], new Set([laptop]))).toEqual([
+      sharedRepo,
+    ]);
+    expect(projectGroupsInEnvironmentScope([sharedRepo, vpsOnly], null)).toEqual([
+      sharedRepo,
+      vpsOnly,
+    ]);
+  });
+
+  it("lists threads only from scoped environments, within the scoped projects", () => {
+    const thread = (environmentId: EnvironmentId, projectId: string, id: string) => ({
+      archivedAt: null,
+      environmentId,
+      id: ThreadId.make(id),
+      lineage: {
+        rootThreadId: ThreadId.make(id),
+        parentThreadId: null,
+        relationshipToParent: null,
+      },
+      projectId,
+    });
+    const threads = [
+      thread(laptop, "t3-laptop", "a"),
+      thread(vps, "t3-vps", "b"),
+      thread(vps, "ops", "c"),
+      thread(studio, "studio-app", "d"),
+    ];
+    const listed = (keys: ReadonlySet<string> | null) =>
+      filterScopedThreads(threads, keys, new Set()).map((candidate) => candidate.id);
+
+    expect(
+      listed(
+        resolveSidebarScopedProjectKeys({
+          projectGroups: [],
+          projects,
+          environmentScope: new Set([vps]),
+        }),
+      ),
+    ).toEqual(["b", "c"]);
+    expect(
+      listed(
+        resolveSidebarScopedProjectKeys({
+          projectGroups: [sharedRepo],
+          projects,
+          environmentScope: new Set([vps, studio]),
+        }),
+      ),
+    ).toEqual(["b"]);
+    expect(
+      resolveSidebarScopedProjectKeys({ projectGroups: [], projects, environmentScope: null }),
+    ).toBeNull();
+  });
+
+  it("loads older settled threads only from scoped environments", () => {
+    expect(olderSettledScopes([laptop, vps, studio], new Set([vps]), null)).toEqual([
+      { environmentId: vps, projectIds: null },
+    ]);
+    expect(
+      olderSettledScopes(
+        [laptop, vps],
+        new Set([vps]),
+        new Set(["env-vps:t3-vps", "env-laptop:t3-laptop"]),
+      ),
+    ).toEqual([{ environmentId: vps, projectIds: [ProjectId.make("t3-vps")] }]);
+    expect(olderSettledScopes([laptop, vps], null, null)).toEqual([
+      { environmentId: laptop, projectIds: null },
+      { environmentId: vps, projectIds: null },
+    ]);
   });
 });

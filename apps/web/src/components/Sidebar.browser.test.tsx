@@ -25,10 +25,15 @@ import { useNowMinute } from "../hooks/useNowMinute";
 import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { useProjects, useServerConfigs, useQuietThreadShells } from "../state/entities";
-import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  useConnectedEnvironmentIds,
+  useEnabledEnvironmentIdentities,
+  usePrimaryEnvironmentId,
+} from "../state/environments";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
+import { useUiStateStore } from "../uiStateStore";
 import { readLocalApi } from "../localApi";
 import type { Project } from "../types";
 import Sidebar from "./Sidebar";
@@ -190,6 +195,69 @@ describe("sidebar project folder new thread", () => {
     await userEvent.click(screen.getByRole("button", { name: "New thread in acme/demo-repo" }));
 
     expect(startThread).toHaveBeenCalledExactlyOnceWith(dev1ProjectRef);
+  });
+});
+
+describe("sidebar environment scope", () => {
+  it("lists only the picked environment's threads until all environments are shown again", async () => {
+    using stack = new DisposableStack();
+    const initialUiState = useUiStateStore.getState();
+    stack.defer(() => useUiStateStore.setState(initialUiState, true));
+    const laptop = EnvironmentId.make("local");
+    const vps = EnvironmentId.make("vps");
+    const laptopProject = project("laptop-app");
+    const vpsProject = { ...project("vps-app"), environmentId: vps };
+    vi.mocked(useEnabledEnvironmentIdentities).mockReturnValue([
+      { environmentId: vps, label: "VPS" },
+      { environmentId: laptop, label: "Laptop" },
+    ]);
+    vi.mocked(useConnectedEnvironmentIds).mockReturnValue([laptop, vps]);
+    vi.mocked(useProjects).mockReturnValue([laptopProject, vpsProject]);
+    vi.mocked(useQuietThreadShells).mockReturnValue([
+      makeThreadFixture({
+        environmentId: laptop,
+        id: ThreadId.make("laptop-thread"),
+        projectId: laptopProject.id,
+        title: "Laptop work",
+      }),
+      makeThreadFixture({
+        environmentId: vps,
+        id: ThreadId.make("vps-thread"),
+        projectId: vpsProject.id,
+        title: "VPS work",
+      }),
+    ]);
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: null,
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn(),
+      routeDraftId: null,
+      routeThreadRef: null,
+    });
+
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    await expect.element(screen.getByText("Laptop work").first()).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Environments", exact: true }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "VPS" }));
+
+    await expect.element(screen.getByText("Laptop work")).not.toBeInTheDocument();
+    await expect.element(screen.getByText("VPS work").first()).toBeInTheDocument();
+    await expect
+      .element(screen.getByRole("button", { name: "Environments: VPS" }))
+      .toBeInTheDocument();
+    expect(useUiStateStore.getState().sidebarEnvironmentScopeIds).toEqual([vps]);
+
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "All environments" }));
+
+    await expect.element(screen.getByText("Laptop work").first()).toBeInTheDocument();
+    expect(useUiStateStore.getState().sidebarEnvironmentScopeIds).toEqual([]);
   });
 });
 

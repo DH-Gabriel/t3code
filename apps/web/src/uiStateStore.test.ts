@@ -20,6 +20,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKeys: [],
+    sidebarEnvironmentScopeIds: [],
     threadLastVisitedAtById: {},
     defaultAdvertisedEndpointKey: null,
     pullRequestMergeMethod: "merge",
@@ -118,6 +119,7 @@ describe("parsePersistedState", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKeys: [],
+      sidebarEnvironmentScopeIds: [],
       pullRequestMergeMethod: "merge",
     });
   });
@@ -205,6 +207,7 @@ describe("uiStateStore persistence", () => {
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKeys: [],
       sidebarProjectScopeKey: null,
+      sidebarEnvironmentScopeIds: [],
       pullRequestMergeMethod: "merge",
     });
     expect(parsePersistedState(persisted)).toEqual({
@@ -221,6 +224,23 @@ describe("uiStateStore persistence", () => {
     ) as PersistedUiState;
 
     expect(parsePersistedState(persisted).sidebarProjectScopeKeys).toEqual(keys);
+  });
+
+  it("restores the sidebar environment scope across reloads and drops malformed ids", () => {
+    persistState(makeUiState({ sidebarEnvironmentScopeIds: ["env-laptop", "env-vps"] }));
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(parsePersistedState(persisted).sidebarEnvironmentScopeIds).toEqual([
+      "env-laptop",
+      "env-vps",
+    ]);
+    expect(
+      parsePersistedState({
+        sidebarEnvironmentScopeIds: ["env-laptop", "", 7, "env-laptop"] as unknown as string[],
+      }).sidebarEnvironmentScopeIds,
+    ).toEqual(["env-laptop"]);
   });
 
   it("keeps a single-project scope readable by older clients", () => {
