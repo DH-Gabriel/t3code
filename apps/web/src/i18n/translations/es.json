@@ -13041,6 +13041,5 @@
   "0d50b5bfe7151ece": "No se pudo descargar el archivo",
   "5f0197a2f37f3ca2": "No hay hilos activos en estos entornos",
   "bfb734a4fc7d41af": "Aún no hay hilos en estos entornos",
-  "ee0b6fa10b34d0bb": "Entornos: {environments}",
-  "041ffa71539cbd39": "Mostrar hilos de"
+  "ee0b6fa10b34d0bb": "Entornos: {environments}"
 }

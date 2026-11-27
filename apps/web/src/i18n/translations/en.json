@@ -13054,6 +13054,5 @@
   "0d50b5bfe7151ece": "Could not download file",
   "5f0197a2f37f3ca2": "No active threads in these environments",
   "bfb734a4fc7d41af": "No threads in these environments yet",
-  "ee0b6fa10b34d0bb": "Environments: {environments}",
-  "041ffa71539cbd39": "Show threads from"
+  "ee0b6fa10b34d0bb": "Environments: {environments}"
 }

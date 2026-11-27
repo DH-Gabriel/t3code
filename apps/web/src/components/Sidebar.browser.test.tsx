@@ -250,7 +250,10 @@ describe("sidebar environment scope", () => {
     await expect.element(screen.getByText("Laptop work").first()).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Environments", exact: true }));
-    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "VPS" }));
+    await expect
+      .element(screen.getByRole("menuitemcheckbox", { name: "Laptop" }))
+      .toHaveAttribute("aria-checked", "true");
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Laptop" }));
 
     await expect.element(screen.getByText("Laptop work")).not.toBeInTheDocument();
     await expect.element(screen.getByText("VPS work").first()).toBeInTheDocument();

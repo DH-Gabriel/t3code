@@ -7,15 +7,7 @@ import {
   toggleSidebarEnvironmentScope,
   type SidebarEnvironmentScopeOption,
 } from "../Sidebar.logic";
-import {
-  Menu,
-  MenuCheckboxItem,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuPopup,
-  MenuSeparator,
-  MenuTrigger,
-} from "../ui/menu";
+import { Menu, MenuCheckboxItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { SidebarHeaderIconButton } from "./SidebarThreadHeader";
 
 export function SidebarEnvironmentScopeMenu(props: {
@@ -59,33 +51,26 @@ export function SidebarEnvironmentScopeMenu(props: {
         )}
       </MenuTrigger>
       <MenuPopup align="start" className="w-[min(16rem,var(--available-width))]">
-        <MenuGroup>
-          <MenuGroupLabel>
-            <T>Show threads from</T>
-          </MenuGroupLabel>
-          <MenuCheckboxItem checked={scope === null} onCheckedChange={() => onScopeChange([])}>
-            <T>All environments</T>
+        <MenuCheckboxItem
+          checked={scope === null}
+          closeOnClick={false}
+          onCheckedChange={() => onScopeChange([])}
+        >
+          <T>All environments</T>
+        </MenuCheckboxItem>
+        <MenuSeparator />
+        {options.map((option) => (
+          <MenuCheckboxItem
+            key={option.environmentId}
+            checked={scope === null || scope.has(option.environmentId)}
+            closeOnClick={false}
+            onCheckedChange={() =>
+              onScopeChange(toggleSidebarEnvironmentScope(scope, option.environmentId, options))
+            }
+          >
+            <span className="min-w-0 truncate">{option.label}</span>
           </MenuCheckboxItem>
-          <MenuSeparator />
-          {options.map((option) => (
-            <MenuCheckboxItem
-              key={option.environmentId}
-              checked={scope?.has(option.environmentId) ?? false}
-              onCheckedChange={() =>
-                onScopeChange(toggleSidebarEnvironmentScope(scope, option.environmentId, options))
-              }
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <EnvironmentMachineIcon
-                  aria-hidden
-                  kind={machineById.get(option.environmentId) ?? "server"}
-                  className="size-3.5 shrink-0 text-muted-foreground"
-                />
-                <span className="min-w-0 truncate">{option.label}</span>
-              </span>
-            </MenuCheckboxItem>
-          ))}
-        </MenuGroup>
+        ))}
       </MenuPopup>
     </Menu>
   );
