@@ -1233,12 +1233,14 @@ export function toggleSidebarEnvironmentScope(
   environmentId: EnvironmentId,
   options: readonly SidebarEnvironmentScopeOption[],
 ): EnvironmentId[] {
-  const next =
-    scope === null
-      ? [environmentId]
-      : scope.has(environmentId)
-        ? [...scope].filter((candidate) => candidate !== environmentId)
-        : [...scope, environmentId];
+  const current = options
+    .map((option) => option.environmentId)
+    .filter((candidate) => scope === null || scope.has(candidate));
+  const next = current.includes(environmentId)
+    ? current.filter((candidate) => candidate !== environmentId)
+    : [...current, environmentId];
+  // An empty sidebar is never useful, so the last checked environment stays checked.
+  if (next.length === 0) return current;
   return next.length === options.length ? [] : next;
 }
 

@@ -1902,11 +1902,12 @@ describe("sidebar environment scope", () => {
     expect(resolveSidebarEnvironmentScope(["env-gone", vps], options)).toEqual(new Set([vps]));
   });
 
-  it("narrows from all to the picked environment, then adds and removes picks", () => {
-    expect(toggleSidebarEnvironmentScope(null, vps, options)).toEqual([vps]);
+  it("unchecks from all, adds and removes picks, and keeps the last pick", () => {
+    expect(toggleSidebarEnvironmentScope(null, vps, options)).toEqual([laptop, studio]);
     expect(toggleSidebarEnvironmentScope(new Set([vps]), laptop, options)).toEqual([vps, laptop]);
     expect(toggleSidebarEnvironmentScope(new Set([vps, laptop]), vps, options)).toEqual([laptop]);
     expect(toggleSidebarEnvironmentScope(new Set([vps, laptop]), studio, options)).toEqual([]);
+    expect(toggleSidebarEnvironmentScope(new Set([vps]), vps, options)).toEqual([vps]);
   });
 
   it("keeps project groups with a member in a scoped environment", () => {
