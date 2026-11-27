@@ -7,6 +7,7 @@ import {
 import { Discovery } from "@t3tools/client-runtime/relay";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
+import { Atom } from "effect/reactivity";
 import { useState } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
@@ -120,6 +121,30 @@ export function useRetainedRelayEnvironments() {
 
 export function useEnvironmentIdentities() {
   return useAtomValue(environmentSummaries.identitiesAtom);
+}
+
+// Reads the catalog, not connection summaries, so connection churn does not re-render readers.
+const enabledEnvironmentIdentitiesAtom = Atom.make((get) => {
+  const next = [...get(environmentCatalog.catalogValueAtom).entries].flatMap(
+    ([environmentId, entry]) =>
+      entry.enabled ? [{ environmentId, label: entry.target.label }] : [],
+  );
+  const previous = Option.getOrNull(
+    get.self<ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly label: string }>>(),
+  );
+  return previous !== null &&
+    previous.length === next.length &&
+    next.every(
+      (value, index) =>
+        value.environmentId === previous[index]?.environmentId &&
+        value.label === previous[index]?.label,
+    )
+    ? previous
+    : next;
+});
+
+export function useEnabledEnvironmentIdentities() {
+  return useAtomValue(enabledEnvironmentIdentitiesAtom);
 }
 
 export function usePullRequestsSupported() {

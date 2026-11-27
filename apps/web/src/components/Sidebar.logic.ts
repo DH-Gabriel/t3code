@@ -1,7 +1,7 @@
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
-import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
+import { isShownUnderParent, type OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
@@ -21,6 +21,7 @@ import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/sh
 import {
   type ContextMenuItem,
   type EnvironmentId,
+  ProjectId,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
@@ -1198,6 +1199,116 @@ export function filterSidebarProjectScopeItems<TItem extends { readonly value: s
       item.value !== ADD_PROJECT_SCOPE_ITEM_VALUE &&
       input.matches(item, query),
   );
+}
+
+export interface SidebarEnvironmentScopeOption {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+}
+
+/** Environments by label, as the mobile thread list offers them. */
+export function sidebarEnvironmentScopeOptions(
+  environments: ReadonlyArray<SidebarEnvironmentScopeOption>,
+): SidebarEnvironmentScopeOption[] {
+  return environments.toSorted((left, right) => left.label.localeCompare(right.label));
+}
+
+/**
+ * The stored environment scope narrowed to the environments offered. Narrowing to none, or to
+ * every one, reads as all environments; the stored ids stay so a returning machine is scoped again.
+ */
+export function resolveSidebarEnvironmentScope(
+  storedIds: readonly string[],
+  options: readonly SidebarEnvironmentScopeOption[],
+): ReadonlySet<EnvironmentId> | null {
+  const chosen = options
+    .map((option) => option.environmentId)
+    .filter((environmentId) => storedIds.includes(environmentId));
+  return chosen.length === 0 || chosen.length === options.length ? null : new Set(chosen);
+}
+
+/** From all environments, a pick shows only that one; later picks add or remove. */
+export function toggleSidebarEnvironmentScope(
+  scope: ReadonlySet<EnvironmentId> | null,
+  environmentId: EnvironmentId,
+  options: readonly SidebarEnvironmentScopeOption[],
+): EnvironmentId[] {
+  const next =
+    scope === null
+      ? [environmentId]
+      : scope.has(environmentId)
+        ? [...scope].filter((candidate) => candidate !== environmentId)
+        : [...scope, environmentId];
+  return next.length === options.length ? [] : next;
+}
+
+export function projectGroupsInEnvironmentScope<
+  T extends {
+    readonly memberProjectRefs: ReadonlyArray<{ readonly environmentId: EnvironmentId }>;
+  },
+>(groups: readonly T[], scope: ReadonlySet<EnvironmentId> | null): readonly T[] {
+  if (scope === null) return groups;
+  return groups.filter((group) =>
+    group.memberProjectRefs.some((projectRef) => scope.has(projectRef.environmentId)),
+  );
+}
+
+/**
+ * `environmentId:projectId` keys of the projects the sidebar lists: the scoped projects' members
+ * in the scoped environments, else every project in them, else null for everything.
+ */
+export function resolveSidebarScopedProjectKeys(input: {
+  readonly projectGroups: ReadonlyArray<{
+    readonly memberProjectRefs: ReadonlyArray<{
+      readonly environmentId: EnvironmentId;
+      readonly projectId: string;
+    }>;
+  }>;
+  readonly projects: ReadonlyArray<{ readonly environmentId: EnvironmentId; readonly id: string }>;
+  readonly environmentScope: ReadonlySet<EnvironmentId> | null;
+}): ReadonlySet<string> | null {
+  const { projectGroups, projects, environmentScope } = input;
+  const inScope = (environmentId: EnvironmentId) =>
+    environmentScope === null || environmentScope.has(environmentId);
+  if (projectGroups.length > 0) {
+    return new Set(
+      projectGroups.flatMap((group) =>
+        group.memberProjectRefs.flatMap((projectRef) =>
+          inScope(projectRef.environmentId)
+            ? [`${projectRef.environmentId}:${projectRef.projectId}`]
+            : [],
+        ),
+      ),
+    );
+  }
+  if (environmentScope === null) return null;
+  return new Set(
+    projects.flatMap((project) =>
+      inScope(project.environmentId) ? [`${project.environmentId}:${project.id}`] : [],
+    ),
+  );
+}
+
+/** The scope older settled pages load per environment: the scoped projects there, or all of them. */
+export function olderSettledScopes(
+  environmentIds: ReadonlyArray<EnvironmentId>,
+  environmentScope: ReadonlySet<EnvironmentId> | null,
+  projectScopeKeys: ReadonlySet<string> | null,
+): ReadonlyArray<OlderSettledScope> {
+  const scopedEnvironmentIds =
+    environmentScope === null
+      ? environmentIds
+      : environmentIds.filter((environmentId) => environmentScope.has(environmentId));
+  if (projectScopeKeys === null) {
+    return scopedEnvironmentIds.map((environmentId) => ({ environmentId, projectIds: null }));
+  }
+  return scopedEnvironmentIds.flatMap((environmentId) => {
+    const prefix = `${environmentId}:`;
+    const projectIds = [...projectScopeKeys].flatMap((key) =>
+      key.startsWith(prefix) ? [ProjectId.make(key.slice(prefix.length))] : [],
+    );
+    return projectIds.length === 0 ? [] : [{ environmentId, projectIds }];
+  });
 }
 
 interface SidebarProjectScopeMenuState {
